@@ -1,14 +1,22 @@
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+import {
+  Appointment,
+  AuditLogEntry,
+  BulkResult,
+  CreateAppointmentRequest,
+  PaginatedResponse,
+} from "@/types";
 
-export async function fetchApi<T>(
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
+async function request<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${API_BASE}${endpoint}`;
   const response = await fetch(url, {
     headers: {
       "Content-Type": "application/json",
+      "x-user-id": "web-user",
       ...options?.headers,
     },
     ...options,
@@ -24,23 +32,60 @@ export async function fetchApi<T>(
   return response.json();
 }
 
-export const api = {
-  get: <T>(endpoint: string) => fetchApi<T>(endpoint),
+export async function createAppointment(
+  data: CreateAppointmentRequest
+): Promise<Appointment> {
+  return request<Appointment>("/api/appointments", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
 
-  post: <T>(endpoint: string, data: unknown) =>
-    fetchApi<T>(endpoint, {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+export async function getAppointments(
+  filters?: Record<string, string>
+): Promise<PaginatedResponse<Appointment>> {
+  const params = new URLSearchParams(filters || {});
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return request<PaginatedResponse<Appointment>>(
+    `/api/appointments${query}`
+  );
+}
 
-  put: <T>(endpoint: string, data: unknown) =>
-    fetchApi<T>(endpoint, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
+export async function getAppointmentById(id: string): Promise<Appointment> {
+  return request<Appointment>(`/api/appointments/${id}`);
+}
 
-  delete: <T>(endpoint: string) =>
-    fetchApi<T>(endpoint, {
-      method: "DELETE",
-    }),
-};
+export async function updateAppointment(
+  id: string,
+  data: Partial<CreateAppointmentRequest>
+): Promise<Appointment> {
+  return request<Appointment>(`/api/appointments/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function cancelAppointment(
+  id: string,
+  reason: string
+): Promise<Appointment> {
+  return request<Appointment>(`/api/appointments/${id}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ cancellationReason: reason }),
+  });
+}
+
+export async function createBulkAppointments(
+  appointments: CreateAppointmentRequest[]
+): Promise<BulkResult> {
+  return request<BulkResult>("/api/appointments/bulk", {
+    method: "POST",
+    body: JSON.stringify({ appointments }),
+  });
+}
+
+export async function getAppointmentAudit(
+  id: string
+): Promise<AuditLogEntry[]> {
+  return request<AuditLogEntry[]>(`/api/appointments/${id}/audit`);
+}

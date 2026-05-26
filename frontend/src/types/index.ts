@@ -45,7 +45,7 @@ export interface Appointment {
   noShowFlag: boolean;
   checkInTimestamp: string | null;
   gateCompleteTimestamp: string | null;
-  transactions: AppointmentTransaction[];
+  transactions?: AppointmentTransaction[];
 }
 
 export interface AppointmentTransaction {
@@ -65,18 +65,54 @@ export interface AppointmentTransaction {
   validationStatus: string;
 }
 
-export interface Terminal {
-  terminalId: string;
-  code: string;
-  name: string;
-  timezone: string;
-  status: string;
-  address: string | null;
+export interface AuditLogEntry {
+  auditLogId: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  actorUserId: string;
+  source: string;
+  beforeValue: string | null;
+  afterValue: string | null;
+  reason: string | null;
+  timestamp: string;
 }
 
-export interface TruckingCompany {
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface BulkResult {
+  results: Array<{
+    success: boolean;
+    appointment?: Appointment;
+    error?: string;
+  }>;
+}
+
+export interface CreateAppointmentRequest {
+  terminalId: string;
+  transactionType: string;
+  scacCode: string;
   truckingCompanyId: string;
-  name: string;
-  status: string;
-  primaryContact: string | null;
+  requestedStartTime: string;
+  requestedEndTime: string;
+  slotId?: string;
+  isDualAppointment?: boolean;
+  transactions: Array<{
+    transactionType: string;
+    referenceType: string;
+    referenceNumber: string;
+    containerNumber?: string;
+    bookingNumber?: string;
+    groupCode?: string;
+    edoNumber?: string;
+    chassisNumber?: string;
+    sealNumbers?: string;
+    equipmentType?: string;
+    lineOperator?: string;
+  }>;
 }
