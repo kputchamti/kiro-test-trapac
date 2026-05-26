@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Implement the complete backend Appointment Service: business logic layer, all 7 REST API endpoints (POST /api/appointments, GET /api/appointments, GET /api/appointments/:id, PUT /api/appointments/:id, POST /api/appointments/:id/cancel, POST /api/appointments/bulk, GET /api/appointments/:id/audit), audit logging, stubbed external service interfaces, and comprehensive test suite.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create backend/src/services/appointmentService.ts with class AppointmentService containing methods: createAppointment, getAppointments (with filtering/pagination), getAppointmentById, updateAppointment, cancelAppointment, createBulkAppointments, getAppointmentAudit. Business logic includes: generate unique appointmentNumber (format APT-YYYYMMDD-XXXX), validate required fields based on transactionType, enforce status lifecycle transitions (DRAFT->PENDING->CONFIRMED->CHECKED_IN->COMPLETED; any active status->CANCELLED), enforce cancellation rules (cannot cancel COMPLETED/CANCELLED/CHECKED_IN), support dual appointment creation (create parent + linked appointment with isDualAppointment=true), bulk creation with per-item success/failure tracking.",
     "Create backend/src/services/auditService.ts with class AuditService containing method logAction(entityType, entityId, action, actorUserId, source, beforeValue, afterValue, reason). Stores audit records in AuditLog table. Called by appointmentService on every create/update/cancel.",
@@ -37,5 +37,5 @@
     "cd /projects/sandbox/kiro-test-trapac/backend && npm test"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 46 tests pass (27 unit + 19 integration). Tests require --runInBand since they share a SQLite test database (prisma/test.db). Prisma schema updated to use env(DATABASE_URL) instead of hardcoded path; .env file added for dev default. @types/jest installed as missing dev dependency. Jest config uses custom tsconfig with commonjs module resolution and isolatedModules:true to work with ts-jest and Node16 module mode."
 }
