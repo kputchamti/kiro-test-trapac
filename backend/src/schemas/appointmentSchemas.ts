@@ -40,6 +40,16 @@ export const CreateAppointmentSchema = z.object({
   transactions: z.array(TransactionSchema).min(1),
 });
 
+const AppointmentStatusValues = [
+  "DRAFT",
+  "PENDING",
+  "CONFIRMED",
+  "CHECKED_IN",
+  "COMPLETED",
+  "CANCELLED",
+  "NO_SHOW",
+] as const;
+
 export const UpdateAppointmentSchema = z.object({
   requestedStartTime: z.string().optional(),
   requestedEndTime: z.string().optional(),
@@ -47,7 +57,7 @@ export const UpdateAppointmentSchema = z.object({
   truckingCompanyId: z.string().optional(),
   slotId: z.string().optional(),
   gateCode: z.string().optional(),
-  appointmentStatus: z.string().optional(),
+  appointmentStatus: z.enum(AppointmentStatusValues).optional(),
 });
 
 export const CancelAppointmentSchema = z.object({

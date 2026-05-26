@@ -114,7 +114,9 @@ export default function AppointmentForm({
       const txType = tx.transactionType || transactionType;
       if (
         (txType === TransactionType.PICK_IMPORT ||
-          txType === TransactionType.DROP_EXPORT) &&
+          txType === TransactionType.DROP_EXPORT ||
+          txType === TransactionType.DROP_EMPTY ||
+          txType === TransactionType.PICK_EMPTY) &&
         !tx.containerNumber
       ) {
         newErrors[`tx_${idx}_containerNumber`] =
@@ -194,7 +196,9 @@ export default function AppointmentForm({
   const effectiveType = transactionType;
   const showContainerNumber =
     effectiveType === TransactionType.PICK_IMPORT ||
-    effectiveType === TransactionType.DROP_EXPORT;
+    effectiveType === TransactionType.DROP_EXPORT ||
+    effectiveType === TransactionType.DROP_EMPTY ||
+    effectiveType === TransactionType.PICK_EMPTY;
   const showBookingNumber =
     effectiveType === TransactionType.DROP_EXPORT;
   const showChassisNumber =

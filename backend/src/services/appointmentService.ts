@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { AuditService } from "./auditService";
 import { StubSlotService } from "./interfaces/slotService";
 import { StubValidationService } from "./interfaces/validationService";
@@ -65,6 +65,17 @@ export class ServiceError extends Error {
   }
 }
 
+// State machine defining allowed status transitions
+const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ["PENDING", "CANCELLED"],
+  PENDING: ["CONFIRMED", "CANCELLED"],
+  CONFIRMED: ["CHECKED_IN", "CANCELLED"],
+  CHECKED_IN: ["COMPLETED"],
+  COMPLETED: [],
+  CANCELLED: [],
+  NO_SHOW: [],
+};
+
 export class AppointmentService {
   private prisma: PrismaClient;
   private auditService: AuditService;
@@ -88,9 +99,9 @@ export class AppointmentService {
       now.getFullYear().toString() +
       (now.getMonth() + 1).toString().padStart(2, "0") +
       now.getDate().toString().padStart(2, "0");
-    const hex = Math.floor(Math.random() * 0xffff)
+    const hex = Math.floor(Math.random() * 0xffffff)
       .toString(16)
-      .padStart(4, "0")
+      .padStart(6, "0")
       .toUpperCase();
     return `APT-${dateStr}-${hex}`;
   }
@@ -141,7 +152,7 @@ export class AppointmentService {
     this.validateRequiredFields(data.transactionType, data.transactions);
 
     // Validate references
-    await this.validationService.validateReferences(
+    const validationResult = await this.validationService.validateReferences(
       data.transactionType,
       data.transactions.map((t) => ({
         referenceType: t.referenceType,
@@ -149,67 +160,97 @@ export class AppointmentService {
       }))
     );
 
+    if (!validationResult.valid) {
+      throw new ServiceError(
+        `Reference validation failed: ${validationResult.errors.join(", ")}`
+      );
+    }
+
     // Check slot availability
-    await this.slotService.checkAvailability(
+    const slotResult = await this.slotService.checkAvailability(
       data.terminalId,
       data.transactionType,
       new Date(data.requestedStartTime),
       new Date(data.requestedEndTime)
     );
 
-    const appointmentNumber = this.generateAppointmentNumber();
+    if (!slotResult.available) {
+      throw new ServiceError("No slots available for the requested time window");
+    }
 
-    // Create appointment with transactions
-    const appointment = await this.prisma.appointment.create({
-      data: {
-        appointmentNumber,
-        terminalId: data.terminalId,
-        truckingCompanyId: data.truckingCompanyId,
-        scacCode: data.scacCode,
-        transactionType: data.transactionType,
-        appointmentStatus: "PENDING",
-        slotId: data.slotId ?? null,
-        requestedStartTime: new Date(data.requestedStartTime),
-        requestedEndTime: new Date(data.requestedEndTime),
-        isDualAppointment: data.isDualAppointment ?? false,
-        linkedAppointmentId: data.linkedAppointmentId ?? null,
-        source: "WEB",
-        createdBy: actorUserId,
-        transactions: {
-          create: data.transactions.map((t) => ({
-            transactionType: t.transactionType,
-            referenceType: t.referenceType,
-            referenceNumber: t.referenceNumber,
-            containerNumber: t.containerNumber ?? null,
-            bookingNumber: t.bookingNumber ?? null,
-            groupCode: t.groupCode ?? null,
-            edoNumber: t.edoNumber ?? null,
-            chassisNumber: t.chassisNumber ?? null,
-            sealNumbers: t.sealNumbers ?? null,
-            equipmentType: t.equipmentType ?? null,
-            lineOperator: t.lineOperator ?? null,
-            validationStatus: "PENDING",
-          })),
-        },
-      },
-      include: { transactions: true },
-    });
+    // Retry loop for appointment number collision
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const appointmentNumber = this.generateAppointmentNumber();
 
-    // TOS integration
-    await this.tosService.sendAppointmentCreated(appointment.appointmentId);
+      try {
+        // Create appointment with transactions
+        const appointment = await this.prisma.appointment.create({
+          data: {
+            appointmentNumber,
+            terminalId: data.terminalId,
+            truckingCompanyId: data.truckingCompanyId,
+            scacCode: data.scacCode,
+            transactionType: data.transactionType,
+            appointmentStatus: "PENDING",
+            slotId: data.slotId ?? null,
+            requestedStartTime: new Date(data.requestedStartTime),
+            requestedEndTime: new Date(data.requestedEndTime),
+            isDualAppointment: data.isDualAppointment ?? false,
+            linkedAppointmentId: data.linkedAppointmentId ?? null,
+            source: "WEB",
+            createdBy: actorUserId,
+            transactions: {
+              create: data.transactions.map((t) => ({
+                transactionType: t.transactionType,
+                referenceType: t.referenceType,
+                referenceNumber: t.referenceNumber,
+                containerNumber: t.containerNumber ?? null,
+                bookingNumber: t.bookingNumber ?? null,
+                groupCode: t.groupCode ?? null,
+                edoNumber: t.edoNumber ?? null,
+                chassisNumber: t.chassisNumber ?? null,
+                sealNumbers: t.sealNumbers ?? null,
+                equipmentType: t.equipmentType ?? null,
+                lineOperator: t.lineOperator ?? null,
+                validationStatus: "PENDING",
+              })),
+            },
+          },
+          include: { transactions: true },
+        });
 
-    // Audit log
-    await this.auditService.logAction(
-      "APPOINTMENT",
-      appointment.appointmentId,
-      "CREATED",
-      actorUserId,
-      "WEB",
-      null,
-      JSON.stringify(appointment)
-    );
+        // TOS integration
+        await this.tosService.sendAppointmentCreated(appointment.appointmentId);
 
-    return appointment;
+        // Audit log
+        await this.auditService.logAction(
+          "APPOINTMENT",
+          appointment.appointmentId,
+          "CREATED",
+          actorUserId,
+          "WEB",
+          null,
+          JSON.stringify(appointment)
+        );
+
+        return appointment;
+      } catch (error) {
+        // Check if this is a unique constraint violation on appointmentNumber
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002" &&
+          attempt < maxRetries - 1
+        ) {
+          // Retry with a new appointment number
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    // Should not reach here, but just in case
+    throw new ServiceError("Failed to generate unique appointment number after retries");
   }
 
   async getAppointments(filters: GetAppointmentsFilters) {
@@ -326,6 +367,14 @@ export class AppointmentService {
       updateData.gateCode = data.gateCode;
     }
     if (data.appointmentStatus) {
+      // Enforce state machine transitions
+      const currentStatus = existing.appointmentStatus;
+      const allowedNext = ALLOWED_TRANSITIONS[currentStatus];
+      if (!allowedNext || !allowedNext.includes(data.appointmentStatus)) {
+        throw new ServiceError(
+          `Invalid status transition from ${currentStatus} to ${data.appointmentStatus}`
+        );
+      }
       updateData.appointmentStatus = data.appointmentStatus;
     }
 

@@ -47,7 +47,7 @@ describe("AppointmentService", () => {
         validAppointmentData,
         "user-test-001"
       );
-      expect(result.appointmentNumber).toMatch(/^APT-\d{8}-[A-F0-9]{4}$/);
+      expect(result.appointmentNumber).toMatch(/^APT-\d{8}-[A-F0-9]{6}$/);
     });
 
     it("should create appointment with PENDING status", async () => {
@@ -241,6 +241,85 @@ describe("AppointmentService", () => {
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0].beforeValue).not.toBeNull();
       expect(auditLogs[0].afterValue).not.toBeNull();
+    });
+
+    it("should reject illegal transition from PENDING to COMPLETED", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await expect(
+        service.updateAppointment(
+          created.appointmentId,
+          { appointmentStatus: "COMPLETED" },
+          "user-test-001"
+        )
+      ).rejects.toThrow("Invalid status transition from PENDING to COMPLETED");
+    });
+
+    it("should reject illegal transition from CANCELLED to CONFIRMED", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await service.cancelAppointment(
+        created.appointmentId,
+        "Testing",
+        "user-test-001"
+      );
+      // Cannot update a CANCELLED appointment anyway, but test the transition logic
+      await expect(
+        service.updateAppointment(
+          created.appointmentId,
+          { appointmentStatus: "CONFIRMED" },
+          "user-test-001"
+        )
+      ).rejects.toThrow("Cannot update appointment with status CANCELLED");
+    });
+
+    it("should reject illegal transition from PENDING to CHECKED_IN", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await expect(
+        service.updateAppointment(
+          created.appointmentId,
+          { appointmentStatus: "CHECKED_IN" },
+          "user-test-001"
+        )
+      ).rejects.toThrow("Invalid status transition from PENDING to CHECKED_IN");
+    });
+
+    it("should allow valid transition from PENDING to CONFIRMED", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      const updated = await service.updateAppointment(
+        created.appointmentId,
+        { appointmentStatus: "CONFIRMED" },
+        "user-test-001"
+      );
+      expect(updated.appointmentStatus).toBe("CONFIRMED");
+    });
+
+    it("should allow valid transition from CONFIRMED to CHECKED_IN", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await service.updateAppointment(
+        created.appointmentId,
+        { appointmentStatus: "CONFIRMED" },
+        "user-test-001"
+      );
+      const updated = await service.updateAppointment(
+        created.appointmentId,
+        { appointmentStatus: "CHECKED_IN" },
+        "user-test-001"
+      );
+      expect(updated.appointmentStatus).toBe("CHECKED_IN");
     });
   });
 

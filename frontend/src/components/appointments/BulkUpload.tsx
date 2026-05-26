@@ -4,6 +4,11 @@ import { useState } from "react";
 import { CreateAppointmentRequest, TransactionType } from "@/types";
 import { createBulkAppointments } from "@/lib/api";
 
+const TERMINALS = [
+  { id: "term-la-001", name: "TraPac Los Angeles" },
+  { id: "term-oak-001", name: "TraPac Oakland" },
+];
+
 interface BulkRow {
   transactionType: string;
   scacCode: string;
@@ -30,6 +35,8 @@ function emptyRow(): BulkRow {
 }
 
 export default function BulkUpload() {
+  const [terminalId, setTerminalId] = useState("");
+  const [truckingCompanyId, setTruckingCompanyId] = useState("");
   const [rows, setRows] = useState<BulkRow[]>([emptyRow()]);
   const [results, setResults] = useState<BulkResultItem[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -55,10 +62,10 @@ export default function BulkUpload() {
     setResults(null);
 
     const appointments: CreateAppointmentRequest[] = rows.map((row) => ({
-      terminalId: "TRAPAC-LA",
+      terminalId,
       transactionType: row.transactionType,
       scacCode: row.scacCode,
-      truckingCompanyId: "default-company",
+      truckingCompanyId,
       requestedStartTime: new Date(row.requestedStartTime).toISOString(),
       requestedEndTime: new Date(row.requestedEndTime).toISOString(),
       transactions: [
@@ -96,6 +103,40 @@ export default function BulkUpload() {
       <h2 className="text-lg font-medium text-gray-900">
         Bulk Appointment Upload
       </h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded p-4 bg-white">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Terminal
+          </label>
+          <select
+            value={terminalId}
+            onChange={(e) => setTerminalId(e.target.value)}
+            className="mt-1 block w-full border rounded px-3 py-2 text-sm"
+            aria-label="Terminal"
+          >
+            <option value="">Select Terminal</option>
+            {TERMINALS.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Trucking Company ID
+          </label>
+          <input
+            type="text"
+            value={truckingCompanyId}
+            onChange={(e) => setTruckingCompanyId(e.target.value)}
+            placeholder="e.g. tc-test-001"
+            className="mt-1 block w-full border rounded px-3 py-2 text-sm"
+            aria-label="Trucking Company ID"
+          />
+        </div>
+      </div>
 
       {rows.map((row, idx) => (
         <div key={idx} className="border rounded p-4 bg-gray-50">

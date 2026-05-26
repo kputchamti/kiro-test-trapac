@@ -46,7 +46,7 @@ describe("Appointments API", () => {
         .send(validPayload);
 
       expect(res.status).toBe(201);
-      expect(res.body.appointmentNumber).toMatch(/^APT-\d{8}-[A-F0-9]{4}$/);
+      expect(res.body.appointmentNumber).toMatch(/^APT-\d{8}-[A-F0-9]{6}$/);
       expect(res.body.appointmentStatus).toBe("PENDING");
       expect(res.body.transactions).toHaveLength(1);
     });
