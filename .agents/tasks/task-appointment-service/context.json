@@ -1,0 +1,28 @@
+{
+  "project_type": "Full-stack TypeScript application - Next.js frontend with Express backend API",
+  "language": "TypeScript",
+  "build_system": "npm with separate frontend and backend packages in a monorepo structure",
+  "test_framework": "Jest for unit and integration tests, React Testing Library for frontend component tests",
+  "build_command": "npm run build (in both frontend/ and backend/ directories)",
+  "test_command": "npm test (in both frontend/ and backend/ directories)",
+  "verification_instructions": "1. Run 'npm install' in backend/ and frontend/. 2. Run 'npm test' in backend/ to verify API and business logic tests pass. 3. Run 'npm test' in frontend/ to verify component tests pass. 4. Run 'npm run build' in both directories to verify compilation.",
+  "snapshot_or_generated_files": "Prisma generates client code from schema - run 'npx prisma generate' after schema changes",
+  "setup_instructions": "1. cd backend && npm install && npx prisma generate && npx prisma db push. 2. cd frontend && npm install.",
+  "environment_constraints": "OPEN_INTERNET - full network access available. Node.js 22 via nvm. SQLite for local development database (no PostgreSQL server needed). External services (TOS, Payment, Notification, Slot, Validation) are stubbed with interfaces.",
+  "contribution_requirements": "Greenfield project - follow the architecture from design.md. Modular service pattern. REST API endpoints as specified. Complete audit trail on all appointment mutations.",
+  "key_patterns": "Domain-driven design with service layer pattern. Prisma ORM for database access. Express Router for API routes. React components with hooks for frontend. Stubbed external service interfaces for future integration.",
+  "relevant_files": [
+    "backend/src/routes/appointments.ts",
+    "backend/src/services/appointmentService.ts",
+    "backend/src/services/auditService.ts",
+    "backend/src/models/schema.prisma",
+    "backend/src/middleware/auth.ts",
+    "backend/src/types/index.ts",
+    "backend/tests/appointments.test.ts",
+    "frontend/src/app/appointments/page.tsx",
+    "frontend/src/components/appointments/AppointmentForm.tsx",
+    "frontend/src/components/appointments/AppointmentList.tsx",
+    "frontend/src/components/appointments/AppointmentDetail.tsx"
+  ],
+  "directory_structure": "Monorepo with backend/ (Express + Prisma + SQLite) and frontend/ (Next.js + React). backend/src/routes/ for API endpoints, backend/src/services/ for business logic, backend/src/middleware/ for auth/validation, backend/prisma/ for schema and migrations, backend/tests/ for test files. frontend/src/app/ for Next.js pages, frontend/src/components/ for React components, frontend/src/lib/ for API client and utilities."
+}
