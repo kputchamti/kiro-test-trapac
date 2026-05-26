@@ -40,6 +40,7 @@ export default function BulkUpload() {
   const [rows, setRows] = useState<BulkRow[]>([emptyRow()]);
   const [results, setResults] = useState<BulkResultItem[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   function updateRow(index: number, field: keyof BulkRow, value: string) {
     const updated = [...rows];
@@ -57,7 +58,39 @@ export default function BulkUpload() {
     }
   }
 
+  function validate(): boolean {
+    const errors: string[] = [];
+
+    if (!terminalId) {
+      errors.push("Terminal is required");
+    }
+    if (!truckingCompanyId.trim()) {
+      errors.push("Trucking Company ID is required");
+    }
+
+    rows.forEach((row, idx) => {
+      const rowNum = idx + 1;
+      if (!row.transactionType) {
+        errors.push(`Row ${rowNum}: Transaction type is required`);
+      }
+      if (!row.referenceNumber.trim()) {
+        errors.push(`Row ${rowNum}: Reference number is required`);
+      }
+      if (!row.requestedStartTime) {
+        errors.push(`Row ${rowNum}: Start time is required`);
+      }
+      if (!row.requestedEndTime) {
+        errors.push(`Row ${rowNum}: End time is required`);
+      }
+    });
+
+    setValidationErrors(errors);
+    return errors.length === 0;
+  }
+
   async function handleSubmit() {
+    if (!validate()) return;
+
     setSubmitting(true);
     setResults(null);
 
@@ -137,6 +170,19 @@ export default function BulkUpload() {
           />
         </div>
       </div>
+
+      {validationErrors.length > 0 && (
+        <div className="border border-red-300 rounded p-3 bg-red-50" role="alert">
+          <p className="text-sm font-medium text-red-800 mb-1">
+            Please fix the following errors:
+          </p>
+          <ul className="list-disc list-inside text-sm text-red-700">
+            {validationErrors.map((error, idx) => (
+              <li key={idx}>{error}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {rows.map((row, idx) => (
         <div key={idx} className="border rounded p-4 bg-gray-50">

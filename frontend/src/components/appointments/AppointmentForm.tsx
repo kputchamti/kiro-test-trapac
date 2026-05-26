@@ -28,8 +28,8 @@ interface AppointmentFormProps {
 }
 
 const TERMINALS = [
-  { id: "TRAPAC-LA", name: "TraPac Los Angeles" },
-  { id: "TRAPAC-OAK", name: "TraPac Oakland" },
+  { id: "term-la-001", name: "TraPac Los Angeles" },
+  { id: "term-oak-001", name: "TraPac Oakland" },
 ];
 
 function emptyTransaction(): TransactionFormData {

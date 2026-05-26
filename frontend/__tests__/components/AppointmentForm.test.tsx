@@ -73,7 +73,7 @@ describe("AppointmentForm", () => {
     render(<AppointmentForm mode="create" onSubmit={mockOnSubmit} />);
 
     fireEvent.change(screen.getByLabelText("Terminal"), {
-      target: { value: "TRAPAC-LA" },
+      target: { value: "term-la-001" },
     });
     fireEvent.change(screen.getByLabelText("Transaction Type"), {
       target: { value: "PICK_IMPORT" },
@@ -103,7 +103,7 @@ describe("AppointmentForm", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith(
         expect.objectContaining({
-          terminalId: "TRAPAC-LA",
+          terminalId: "term-la-001",
           transactionType: "PICK_IMPORT",
           scacCode: "TEST",
           truckingCompanyId: "company-1",

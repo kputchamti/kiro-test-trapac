@@ -321,6 +321,39 @@ describe("AppointmentService", () => {
       );
       expect(updated.appointmentStatus).toBe("CHECKED_IN");
     });
+
+    it("should reject setting status to CANCELLED via update endpoint", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await expect(
+        service.updateAppointment(
+          created.appointmentId,
+          { appointmentStatus: "CANCELLED" },
+          "user-test-001"
+        )
+      ).rejects.toThrow("Invalid status transition from PENDING to CANCELLED");
+    });
+
+    it("should reject setting CONFIRMED appointment to CANCELLED via update endpoint", async () => {
+      const created = await service.createAppointment(
+        validAppointmentData,
+        "user-test-001"
+      );
+      await service.updateAppointment(
+        created.appointmentId,
+        { appointmentStatus: "CONFIRMED" },
+        "user-test-001"
+      );
+      await expect(
+        service.updateAppointment(
+          created.appointmentId,
+          { appointmentStatus: "CANCELLED" },
+          "user-test-001"
+        )
+      ).rejects.toThrow("Invalid status transition from CONFIRMED to CANCELLED");
+    });
   });
 
   describe("cancelAppointment", () => {

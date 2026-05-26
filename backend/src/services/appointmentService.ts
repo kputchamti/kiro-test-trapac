@@ -66,10 +66,12 @@ export class ServiceError extends Error {
 }
 
 // State machine defining allowed status transitions
+// CANCELLED is not allowed here - cancellation must go through the dedicated cancel endpoint
+// which handles slot release, notification, reason/timestamp recording, and audit
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  DRAFT: ["PENDING", "CANCELLED"],
-  PENDING: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["CHECKED_IN", "CANCELLED"],
+  DRAFT: ["PENDING"],
+  PENDING: ["CONFIRMED"],
+  CONFIRMED: ["CHECKED_IN"],
   CHECKED_IN: ["COMPLETED"],
   COMPLETED: [],
   CANCELLED: [],
