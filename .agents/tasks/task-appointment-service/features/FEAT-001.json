@@ -1,0 +1,41 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Set up the monorepo project structure with backend (Express + Prisma + SQLite) and frontend (Next.js), including database schema for Appointment, AppointmentTransaction, AuditLog, Terminal, User, TruckingCompany, and SCAC tables. Seed reference data for terminals and a test trucking company.",
+  "status": "in_progress",
+  "steps": [
+    "Create the monorepo root with a top-level package.json that has scripts to run both backend and frontend",
+    "Create backend/ directory with package.json including dependencies: express, @prisma/client, prisma, typescript, ts-node, cors, uuid, zod for validation. Dev deps: jest, ts-jest, @types/express, @types/node, @types/cors, supertest, @types/supertest",
+    "Create backend/tsconfig.json with strict TypeScript configuration targeting ES2022/NodeNext",
+    "Create backend/prisma/schema.prisma with SQLite provider and models: Terminal (terminalId, code, name, timezone, status, address, createdAt, updatedAt), User (userId, username, email, phone, userType, status, createdAt, updatedAt), TruckingCompany (truckingCompanyId, name, status, primaryContact, createdAt, updatedAt), Scac (scacCode as id, truckingCompanyId FK, status), Appointment (appointmentId, appointmentNumber unique, terminalId FK, truckingCompanyId FK, scacCode, transactionType, appointmentStatus, slotId, requestedStartTime, requestedEndTime, gateCode nullable, isDualAppointment default false, source, createdBy, createdAt, updatedBy, updatedAt, cancellationReason nullable, cancellationTimestamp nullable, noShowFlag default false, checkInTimestamp nullable, gateCompleteTimestamp nullable), AppointmentTransaction (transactionId, appointmentId FK, transactionType, referenceType, referenceNumber, containerNumber nullable, bookingNumber nullable, groupCode nullable, edoNumber nullable, chassisNumber nullable, sealNumbers nullable, equipmentType nullable, lineOperator nullable, validationStatus), AuditLog (auditLogId, entityType, entityId, action, actorUserId, source, beforeValue nullable as JSON string, afterValue nullable as JSON string, reason nullable, timestamp)",
+    "Create backend/prisma/seed.ts that seeds: 2 terminals (TRAPAC-LA, TRAPAC-OAK), 1 trucking company (Test Trucking Co), 1 SCAC (TTCO), 1 test user (dispatcher role)",
+    "Create backend/src/index.ts as Express app entry point with CORS, JSON body parsing, and route mounting",
+    "Create backend/src/types/index.ts with TypeScript enums and types: TransactionType (PICK_CHASSIS, PICK_DRAY, PICK_IMPORT, PICK_EMPTY, DROP_CHASSIS, DROP_DRAY, DROP_EXPORT, DROP_EMPTY, TWIN_EMPTY, DUAL), AppointmentStatus (DRAFT, PENDING, CONFIRMED, CHECKED_IN, COMPLETED, CANCELLED, NO_SHOW), and request/response DTOs",
+    "Create frontend/ directory with Next.js 14 app router setup: package.json with next, react, react-dom, typescript, tailwindcss, @types/react, @types/node, jest, @testing-library/react, @testing-library/jest-dom",
+    "Create frontend/tsconfig.json, frontend/tailwind.config.ts, frontend/next.config.js",
+    "Create frontend/src/app/layout.tsx with basic layout and navigation stub",
+    "Create frontend/src/app/page.tsx as home page with link to appointments",
+    "Create frontend/src/lib/api.ts as API client module with base URL configuration pointing to http://localhost:3001/api",
+    "Add backend jest.config.ts configured for ts-jest with moduleNameMapper",
+    "Add frontend jest.config.ts configured for next/jest with jsdom test environment",
+    "Run npm install in backend/ and frontend/ to verify dependencies resolve",
+    "Run npx prisma generate and npx prisma db push in backend/ to create SQLite database",
+    "Run npx prisma db seed in backend/ to populate reference data",
+    "Run npm run build in backend/ to verify TypeScript compilation"
+  ],
+  "acceptance_criteria": [
+    "backend/prisma/schema.prisma contains all required models with correct fields and relationships",
+    "Running 'npx prisma generate' in backend/ succeeds without errors",
+    "Running 'npx prisma db push' in backend/ creates the SQLite database file",
+    "Running 'npx prisma db seed' in backend/ populates terminal and test data",
+    "backend/src/index.ts starts an Express server on port 3001",
+    "frontend/ contains a working Next.js setup that compiles with 'npm run build'",
+    "TypeScript types in backend/src/types/index.ts cover all transaction types and appointment statuses from the design doc"
+  ],
+  "verification": [
+    "cd /projects/sandbox/kiro-test-trapac/backend && npm install && npx prisma generate && npx prisma db push && npm run build",
+    "cd /projects/sandbox/kiro-test-trapac/frontend && npm install && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Terminal {
+  terminalId   String        @id @default(uuid())
+  code         String        @unique
+  name         String
+  timezone     String
+  status       String        @default("ACTIVE")
+  address      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+}
+
+model User {
+  userId    String   @id @default(uuid())
+  username  String   @unique
+  email     String
+  phone     String?
+  userType  String
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TruckingCompany {
+  truckingCompanyId String        @id @default(uuid())
+  name              String
+  status            String        @default("ACTIVE")
+  primaryContact    String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  scacs             Scac[]
+  appointments      Appointment[]
+}
+
+model Scac {
+  scacCode          String          @id
+  truckingCompanyId String
+  status            String          @default("ACTIVE")
+  truckingCompany   TruckingCompany @relation(fields: [truckingCompanyId], references: [truckingCompanyId])
+}
+
+model Appointment {
+  appointmentId          String                   @id @default(uuid())
+  appointmentNumber      String                   @unique
+  terminalId             String
+  truckingCompanyId      String
+  scacCode               String
+  transactionType        String
+  appointmentStatus      String                   @default("PENDING")
+  slotId                 String?
+  requestedStartTime     DateTime
+  requestedEndTime       DateTime
+  gateCode               String?
+  isDualAppointment      Boolean                  @default(false)
+  linkedAppointmentId    String?
+  source                 String                   @default("WEB")
+  createdBy              String
+  createdAt              DateTime                 @default(now())
+  updatedBy              String?
+  updatedAt              DateTime                 @updatedAt
+  cancellationReason     String?
+  cancellationTimestamp  DateTime?
+  noShowFlag             Boolean                  @default(false)
+  checkInTimestamp       DateTime?
+  gateCompleteTimestamp  DateTime?
+  terminal               Terminal                 @relation(fields: [terminalId], references: [terminalId])
+  truckingCompany        TruckingCompany          @relation(fields: [truckingCompanyId], references: [truckingCompanyId])
+  transactions           AppointmentTransaction[]
+}
+
+model AppointmentTransaction {
+  transactionId    String      @id @default(uuid())
+  appointmentId    String
+  transactionType  String
+  referenceType    String
+  referenceNumber  String
+  containerNumber  String?
+  bookingNumber    String?
+  groupCode        String?
+  edoNumber        String?
+  chassisNumber    String?
+  sealNumbers      String?
+  equipmentType    String?
+  lineOperator     String?
+  validationStatus String      @default("PENDING")
+  appointment      Appointment @relation(fields: [appointmentId], references: [appointmentId])
+}
+
+model AuditLog {
+  auditLogId  String   @id @default(uuid())
+  entityType  String
+  entityId    String
+  action      String
+  actorUserId String
+  source      String   @default("WEB")
+  beforeValue String?
+  afterValue  String?
+  reason      String?
+  timestamp   DateTime @default(now())
+}
