@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import { authMiddleware } from "./middleware/auth";
+import appointmentsRouter from "./routes/appointments";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -7,16 +9,15 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(authMiddleware);
 
 // Health check
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Placeholder route for appointments
-app.get("/api/appointments", (_req, res) => {
-  res.json({ appointments: [], total: 0 });
-});
+// Routes
+app.use("/api/appointments", appointmentsRouter);
 
 // Start server
 if (process.env.NODE_ENV !== "test") {
