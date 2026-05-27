@@ -8,6 +8,7 @@ async function main() {
     where: { code: "TRAPAC-LA" },
     update: {},
     create: {
+      terminalId: "term-la-001",
       code: "TRAPAC-LA",
       name: "TraPac Los Angeles",
       timezone: "America/Los_Angeles",
@@ -20,6 +21,7 @@ async function main() {
     where: { code: "TRAPAC-OAK" },
     update: {},
     create: {
+      terminalId: "term-oak-001",
       code: "TRAPAC-OAK",
       name: "TraPac Oakland",
       timezone: "America/Los_Angeles",

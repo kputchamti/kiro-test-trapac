@@ -6,7 +6,7 @@ import {
   PaginatedResponse,
 } from "@/types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 async function request<T>(
   endpoint: string,
