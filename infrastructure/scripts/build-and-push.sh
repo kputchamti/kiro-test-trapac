@@ -38,6 +38,12 @@ build_and_push() {
     context_dir="${REPO_ROOT}/frontend"
   fi
 
+  # For the api-gateway (monolith phase), use the backend directory
+  if [[ "${svc}" == "api-gateway" ]]; then
+    dockerfile="${REPO_ROOT}/backend/Dockerfile"
+    context_dir="${REPO_ROOT}/backend"
+  fi
+
   if [[ ! -f "${dockerfile}" ]]; then
     echo "[WARN] Dockerfile not found for ${svc} (${dockerfile}). Skipping." >&2
     return

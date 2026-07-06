@@ -192,7 +192,43 @@ deploy_infrastructure() {
 }
 
 # ---------------------------------------------------------------------------
-# Force new ECS task deployment for all services
+# Resolve Secret ARNs from Secrets Manager and inject into task definitions
+# ---------------------------------------------------------------------------
+resolve_secret_arns() {
+  log "Resolving Secrets Manager ARNs for environment '${ENV}'..."
+
+  DB_SECRET_ARN=$(aws secretsmanager describe-secret \
+    --profile    "${PROFILE}" \
+    --region     "${REGION}" \
+    --secret-id  "/${ENV}/trapac-tas/db-connection" \
+    --query      "ARN" \
+    --output     text 2>/dev/null || echo "")
+
+  REDIS_SECRET_ARN=$(aws secretsmanager describe-secret \
+    --profile    "${PROFILE}" \
+    --region     "${REGION}" \
+    --secret-id  "/${ENV}/trapac-tas/redis-connection" \
+    --query      "ARN" \
+    --output     text 2>/dev/null || echo "")
+
+  COGNITO_SECRET_ARN=$(aws secretsmanager describe-secret \
+    --profile    "${PROFILE}" \
+    --region     "${REGION}" \
+    --secret-id  "/${ENV}/trapac-tas/cognito" \
+    --query      "ARN" \
+    --output     text 2>/dev/null || echo "")
+
+  if [[ -z "${DB_SECRET_ARN}" || -z "${REDIS_SECRET_ARN}" || -z "${COGNITO_SECRET_ARN}" ]]; then
+    warn "One or more Secrets Manager ARNs could not be resolved. " \
+         "Deploy the CloudFormation stack first (deploy.sh --skip-deploy)."
+  else
+    ok "Secrets resolved: DB=${DB_SECRET_ARN}"
+    ok "               Redis=${REDIS_SECRET_ARN}"
+    ok "             Cognito=${COGNITO_SECRET_ARN}"
+  fi
+}
+
+
 # ---------------------------------------------------------------------------
 deploy_services() {
   if [[ "${SKIP_DEPLOY}" == true ]]; then
@@ -254,15 +290,24 @@ register_task_definition() {
   # Replace placeholders in the template and register
   local rendered
   rendered=$(jq \
-    --arg family  "${STACK_PREFIX}-${svc}" \
-    --arg image   "${image}" \
-    --arg env     "${ENV}" \
-    --arg region  "${REGION}" \
+    --arg family     "${STACK_PREFIX}-${svc}" \
+    --arg image      "${image}" \
+    --arg env        "${ENV}" \
+    --arg region     "${REGION}" \
+    --arg stack      "${STACK_PREFIX}" \
+    --arg db_arn     "${DB_SECRET_ARN:-PLACEHOLDER_DB_SECRET_ARN}" \
+    --arg redis_arn  "${REDIS_SECRET_ARN:-PLACEHOLDER_REDIS_SECRET_ARN}" \
+    --arg cognito_arn "${COGNITO_SECRET_ARN:-PLACEHOLDER_COGNITO_SECRET_ARN}" \
     '.family = $family
      | .containerDefinitions[0].image = $image
      | .containerDefinitions[0].environment += [{"name":"APP_ENV","value":$env}]
      | .executionRoleArn = "arn:aws:iam::'"${ACCOUNT_ID}"':role/'"${STACK_PREFIX}"'-ecs-execution-role"
-     | .taskRoleArn      = "arn:aws:iam::'"${ACCOUNT_ID}"':role/'"${STACK_PREFIX}"'-'"${svc}"'-task-role"' \
+     | .taskRoleArn      = "arn:aws:iam::'"${ACCOUNT_ID}"':role/'"${STACK_PREFIX}"'-'"${svc}"'-task-role"
+     | (.containerDefinitions[0].secrets[] | select(.name == "DB_CONNECTION")).valueFrom    = $db_arn
+     | (.containerDefinitions[0].secrets[] | select(.name == "REDIS_CONNECTION")).valueFrom = $redis_arn
+     | (.containerDefinitions[0].secrets[] | select(.name == "COGNITO_CONFIG")).valueFrom   = $cognito_arn
+     | (.containerDefinitions[0].logConfiguration.options."awslogs-group") = "/ecs/\($stack)/'"${svc}"'"
+     | (.containerDefinitions[0].logConfiguration.options."awslogs-region") = $region' \
     "${task_def_file}")
 
   echo "${rendered}" \
@@ -283,9 +328,10 @@ deploy_frontend() {
     return
   fi
 
-  local frontend_dir="${SCRIPT_DIR}/frontend/build"
+  local frontend_dir="${SCRIPT_DIR}/frontend/out"
   if [[ ! -d "${frontend_dir}" ]]; then
     warn "Frontend build directory not found (${frontend_dir}). Skipping frontend deploy."
+    warn "Run 'cd frontend && npm run build' first, or pass --skip-build to skip this step."
     return
   fi
 
@@ -381,6 +427,7 @@ main() {
   check_prerequisites
   build_and_push_images
   deploy_infrastructure
+  resolve_secret_arns
   deploy_services
   deploy_frontend
   run_smoke_tests

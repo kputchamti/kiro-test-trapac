@@ -1,0 +1,149 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: dev
+        type: choice
+        options: [dev, qa, uat, perf, prod, dr]
+      image_tag:
+        description: "Docker image tag (defaults to short commit SHA)"
+        required: false
+        default: ""
+      skip_build:
+        description: "Skip Docker build and ECR push"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      skip_infra:
+        description: "Skip CloudFormation stack update"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "design.md"
+      - "requirements.md"
+      - "tasks.md"
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # CI gate: must pass before deploy
+  # ---------------------------------------------------------------------------
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  # ---------------------------------------------------------------------------
+  # Build Docker images and push to ECR
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: ci
+    if: ${{ github.event.inputs.skip_build != 'true' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          INPUT_TAG="${{ github.event.inputs.image_tag }}"
+          SHA_TAG=$(git rev-parse --short HEAD)
+          IMAGE_TAG="${INPUT_TAG:-$SHA_TAG}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push all service images
+        env:
+          ECR_BASE_URL: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          ENV: ${{ github.event.inputs.environment || 'dev' }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+        run: |
+          bash infrastructure/scripts/build-and-push.sh \
+            --ecr-base-url "${ECR_BASE_URL}" \
+            --image-tag    "${IMAGE_TAG}" \
+            --services     "api-gateway web-frontend" \
+            --env          "${ENV}"
+
+  # ---------------------------------------------------------------------------
+  # Deploy CloudFormation + ECS services
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    needs: [ci, build-and-push]
+    if: always() && needs.ci.result == 'success'
+
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies (jq, curl already present on ubuntu-latest)
+        run: |
+          sudo apt-get install -y jq
+
+      - name: Run deploy script
+        env:
+          ENV: ${{ github.event.inputs.environment || 'dev' }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag || github.sha }}
+          SKIP_BUILD: "true"
+          SKIP_INFRA: ${{ github.event.inputs.skip_infra || 'false' }}
+        run: |
+          SKIP_BUILD_FLAG=""
+          SKIP_INFRA_FLAG=""
+          [[ "${SKIP_BUILD}" == "true" ]]  && SKIP_BUILD_FLAG="--skip-build"
+          [[ "${SKIP_INFRA}" == "true" ]]  && SKIP_INFRA_FLAG="--skip-infra"
+
+          bash deploy.sh \
+            --env       "${ENV}" \
+            --region    "${AWS_REGION}" \
+            --image-tag "${IMAGE_TAG}" \
+            ${SKIP_BUILD_FLAG} \
+            ${SKIP_INFRA_FLAG}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deployment to ${ENV} failed. Check the logs above."
