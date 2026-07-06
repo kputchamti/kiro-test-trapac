@@ -987,6 +987,12 @@ Resources:
         - openid
         - email
         - profile
+     CallbackURLs:
+        - !Sub "https://${CloudFrontDistribution.DomainName}/callback"
+        - http://localhost:3000/callback
+     LogoutURLs:
+       - !Sub "https://${CloudFrontDistribution.DomainName}/logout"
+       - http://localhost:3000/logout
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
