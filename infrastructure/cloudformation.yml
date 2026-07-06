@@ -987,10 +987,10 @@ Resources:
         - openid
         - email
         - profile
-     CallbackURLs:
+      CallbackURLs:
         - !Sub "https://${CloudFrontDistribution.DomainName}/callback"
         - http://localhost:3000/callback
-     LogoutURLs:
+      LogoutURLs:
        - !Sub "https://${CloudFrontDistribution.DomainName}/logout"
        - http://localhost:3000/logout
 
