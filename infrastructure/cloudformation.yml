@@ -68,14 +68,59 @@ Parameters:
     Default: "0.0.0.0/0"
     Description: CIDR block allowed to reach the ALB (restrict in production)
 
+  EnableWAF:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Deploy WAF WebACL with managed rule sets and associate it with the ALB.
+      Set to true for production; leave false for dev/lower environments.
+
+  EnableCircuitBreaker:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Enable ECS deployment circuit-breaker with automatic rollback on failure.
+      Recommended for production; optional for dev.
+
+  EnableECRScanOnPush:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Enable ECR image scanning on push for container vulnerability detection.
+      Recommended for production; optional for dev to speed up push times.
+
+  EnableSNSFanout:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Create the SNS topic and SQS subscription for the SNS→SQS fan-out pattern.
+      Enable for decoupled event processing in production; optional for dev.
+
+  EnableDLQ:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Create a Dead-Letter Queue and attach redrive policies to all SQS queues.
+      Recommended for production; optional for dev.
+
 # ===========================================================================
 # Conditions
 # ===========================================================================
 Conditions:
 
-  IsProd:       !Equals [!Ref Environment, prod]
-  HasCert:      !Not [!Equals [!Ref CertificateArn, ""]]
-  MultiAZ:      !Or [!Equals [!Ref Environment, prod], !Equals [!Ref Environment, dr]]
+  IsProd:             !Equals [!Ref Environment, prod]
+  HasCert:            !Not [!Equals [!Ref CertificateArn, ""]]
+  MultiAZ:            !Or [!Equals [!Ref Environment, prod], !Equals [!Ref Environment, dr]]
+  UseWAF:             !Equals [!Ref EnableWAF, "true"]
+  UseCircuitBreaker:  !Equals [!Ref EnableCircuitBreaker, "true"]
+  UseECRScanOnPush:   !Equals [!Ref EnableECRScanOnPush, "true"]
+  UseSNSFanout:       !Equals [!Ref EnableSNSFanout, "true"]
+  UseDLQ:             !Equals [!Ref EnableDLQ, "true"]
 
 # ===========================================================================
 # Mappings
@@ -582,7 +627,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-api-gateway"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -593,7 +638,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-identity-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -604,7 +649,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-appointment-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -615,7 +660,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-slot-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -626,7 +671,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-validation-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -637,7 +682,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-waitlist-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -648,7 +693,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-payment-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -659,7 +704,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-notification-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -670,7 +715,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-reporting-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -681,7 +726,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-tos-integration-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -692,7 +737,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-audit-service"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -703,7 +748,7 @@ Resources:
       RepositoryName:      !Sub "${AWS::StackName}-web-frontend"
       ImageTagMutability:  MUTABLE
       ImageScanningConfiguration:
-        ScanOnPush: true
+        ScanOnPush: !If [UseECRScanOnPush, true, false]
       LifecyclePolicy:
         LifecyclePolicyText: |
           {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
@@ -802,6 +847,7 @@ Resources:
   # Dead-letter queue
   DeadLetterQueue:
     Type: AWS::SQS::Queue
+    Condition: UseDLQ
     Properties:
       QueueName:              !Sub "${AWS::StackName}-dlq"
       MessageRetentionPeriod: 1209600  # 14 days
@@ -814,9 +860,11 @@ Resources:
       VisibilityTimeout:         60
       MessageRetentionPeriod:    86400
       KmsMasterKeyId:            alias/aws/sqs
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
-        maxReceiveCount:     5
+      RedrivePolicy: !If
+        - UseDLQ
+        - deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+          maxReceiveCount:     5
+        - !Ref AWS::NoValue
 
   TOSIntegrationQueue:
     Type: AWS::SQS::Queue
@@ -825,9 +873,11 @@ Resources:
       VisibilityTimeout:         120
       MessageRetentionPeriod:    86400
       KmsMasterKeyId:            alias/aws/sqs
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
-        maxReceiveCount:     5
+      RedrivePolicy: !If
+        - UseDLQ
+        - deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+          maxReceiveCount:     5
+        - !Ref AWS::NoValue
 
   NotificationQueue:
     Type: AWS::SQS::Queue
@@ -836,9 +886,11 @@ Resources:
       VisibilityTimeout:         30
       MessageRetentionPeriod:    86400
       KmsMasterKeyId:            alias/aws/sqs
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
-        maxReceiveCount:     3
+      RedrivePolicy: !If
+        - UseDLQ
+        - deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+          maxReceiveCount:     3
+        - !Ref AWS::NoValue
 
   AuditQueue:
     Type: AWS::SQS::Queue
@@ -847,9 +899,11 @@ Resources:
       VisibilityTimeout:         30
       MessageRetentionPeriod:    604800
       KmsMasterKeyId:            alias/aws/sqs
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
-        maxReceiveCount:     3
+      RedrivePolicy: !If
+        - UseDLQ
+        - deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+          maxReceiveCount:     3
+        - !Ref AWS::NoValue
 
   # -------------------------------------------------------------------------
   # SNS Topics
@@ -857,12 +911,14 @@ Resources:
 
   AppointmentEventsTopic:
     Type: AWS::SNS::Topic
+    Condition: UseSNSFanout
     Properties:
       TopicName:  !Sub "${AWS::StackName}-appointment-events"
       KmsMasterKeyId: alias/aws/sns
 
   AppointmentEventsSubscription:
     Type: AWS::SNS::Subscription
+    Condition: UseSNSFanout
     Properties:
       TopicArn:  !Ref AppointmentEventsTopic
       Protocol:  sqs
@@ -1052,6 +1108,7 @@ Resources:
 
   WAFWebACL:
     Type: AWS::WAFv2::WebACL
+    Condition: UseWAF
     Properties:
       Name:        !Sub "${AWS::StackName}-waf"
       Scope:       REGIONAL
@@ -1113,6 +1170,7 @@ Resources:
 
   WAFAssociation:
     Type: AWS::WAFv2::WebACLAssociation
+    Condition: UseWAF
     Properties:
       ResourceArn: !Ref ALB
       WebACLArn:   !GetAtt WAFWebACL.Arn
@@ -1230,9 +1288,11 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 50
         MaximumPercent:        200
-        DeploymentCircuitBreaker:
-          Enable:   true
-          Rollback: true
+        DeploymentCircuitBreaker: !If
+          - UseCircuitBreaker
+          - Enable:   true
+            Rollback: true
+          - !Ref AWS::NoValue
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-gateway"
@@ -1277,6 +1337,7 @@ Resources:
 
   AlarmDLQ:
     Type: AWS::CloudWatch::Alarm
+    Condition: UseDLQ
     Properties:
       AlarmName:          !Sub "${AWS::StackName}-dlq-messages"
       AlarmDescription:   Messages landed in the dead-letter queue
