@@ -1184,8 +1184,7 @@ Resources:
           "host":     "${DBInstance.Endpoint.Address}",
           "port":     "${DBInstance.Endpoint.Port}",
           "dbname":   "trapac_tas",
-          "username": "trapac_admin",
-          "password": "${DBPassword}"
+          "username": "trapac_admin"
         }
 
   RedisConnectionSecret:
