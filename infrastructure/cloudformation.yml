@@ -26,12 +26,7 @@ Parameters:
     Description: >
       ECR base URL, e.g. 123456789012.dkr.ecr.us-west-2.amazonaws.com
 
-  DBPassword:
-    Type: String
-    NoEcho: true
-    Description: Master password for the RDS PostgreSQL instance
-
-  DBInstanceClass:
+ DBInstanceClass:
     Type: String
     Default: db.t3.medium
     Description: RDS instance class
