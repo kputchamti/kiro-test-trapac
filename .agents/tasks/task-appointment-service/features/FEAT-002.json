@@ -1,0 +1,41 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement the complete backend Appointment Service: business logic layer, all 7 REST API endpoints (POST /api/appointments, GET /api/appointments, GET /api/appointments/:id, PUT /api/appointments/:id, POST /api/appointments/:id/cancel, POST /api/appointments/bulk, GET /api/appointments/:id/audit), audit logging, stubbed external service interfaces, and comprehensive test suite.",
+  "status": "completed",
+  "steps": [
+    "Create backend/src/services/appointmentService.ts with class AppointmentService containing methods: createAppointment, getAppointments (with filtering/pagination), getAppointmentById, updateAppointment, cancelAppointment, createBulkAppointments, getAppointmentAudit. Business logic includes: generate unique appointmentNumber (format APT-YYYYMMDD-XXXX), validate required fields based on transactionType, enforce status lifecycle transitions (DRAFT->PENDING->CONFIRMED->CHECKED_IN->COMPLETED; any active status->CANCELLED), enforce cancellation rules (cannot cancel COMPLETED/CANCELLED/CHECKED_IN), support dual appointment creation (create parent + linked appointment with isDualAppointment=true), bulk creation with per-item success/failure tracking.",
+    "Create backend/src/services/auditService.ts with class AuditService containing method logAction(entityType, entityId, action, actorUserId, source, beforeValue, afterValue, reason). Stores audit records in AuditLog table. Called by appointmentService on every create/update/cancel.",
+    "Create backend/src/services/interfaces/slotService.ts as interface ISlotService with methods: checkAvailability(terminalId, transactionType, startTime, endTime) returns available slots, reserveSlot(slotId) returns success/failure, releaseSlot(slotId) returns void. Export a StubSlotService that always returns availability.",
+    "Create backend/src/services/interfaces/validationService.ts as interface IValidationService with method validateReferences(transactionType, references) returns validation result. Export a StubValidationService that always returns valid.",
+    "Create backend/src/services/interfaces/tosIntegrationService.ts as interface ITosIntegrationService with methods: sendAppointmentCreated, sendAppointmentUpdated, sendAppointmentCancelled. Export a StubTosService that logs and returns success.",
+    "Create backend/src/services/interfaces/notificationService.ts as interface INotificationService with method sendNotification(userId, eventType, details). Export a StubNotificationService that logs.",
+    "Create backend/src/services/interfaces/paymentService.ts as interface IPaymentService with method checkPaymentRequired(terminalId, transactionType) returns boolean. Export a StubPaymentService that returns false (no payment required).",
+    "Create backend/src/middleware/auth.ts as a simple middleware that extracts userId from x-user-id header (for development) and attaches it to request. No real auth - just stub for future OIDC.",
+    "Create backend/src/middleware/validate.ts as a Zod-based request validation middleware factory.",
+    "Create backend/src/routes/appointments.ts with Express Router implementing all 7 endpoints. Each endpoint: validates input with Zod schemas, calls AppointmentService, returns proper HTTP status codes (201 for create, 200 for get/update, 204 for cancel where appropriate). Include query params for GET /api/appointments: status, transactionType, terminalId, scacCode, dateFrom, dateTo, page, limit.",
+    "Create backend/src/schemas/appointmentSchemas.ts with Zod schemas for: CreateAppointmentRequest (terminalId required, transactionType required, scacCode required, truckingCompanyId required, requestedStartTime required, requestedEndTime required, transactions array with at least 1 item each having transactionType, referenceType, referenceNumber), UpdateAppointmentRequest (partial of create, cannot change terminalId or transactionType after creation), CancelAppointmentRequest (cancellationReason required), BulkCreateRequest (appointments array of CreateAppointmentRequest).",
+    "Wire up routes in backend/src/index.ts: app.use('/api/appointments', appointmentsRouter)",
+    "Create backend/tests/appointmentService.test.ts with unit tests for AppointmentService: test create appointment generates unique number, test status transitions, test cancellation rules (reject cancel on completed), test dual appointment creates two linked records, test bulk creation with mixed success/failure, test update validates editable fields by status, test audit log is created on each mutation",
+    "Create backend/tests/appointments.api.test.ts with integration tests using supertest: test POST /api/appointments returns 201 with valid data, test GET /api/appointments returns list with pagination, test GET /api/appointments/:id returns single appointment, test PUT /api/appointments/:id updates and returns 200, test POST /api/appointments/:id/cancel returns 200 and changes status, test POST /api/appointments/bulk returns results array, test GET /api/appointments/:id/audit returns audit records, test validation errors return 400, test not-found returns 404",
+    "Ensure all tests can run with 'npm test' in backend/ directory"
+  ],
+  "acceptance_criteria": [
+    "POST /api/appointments creates an appointment with status PENDING and returns 201 with appointmentNumber",
+    "GET /api/appointments returns paginated list filterable by status, transactionType, terminalId, scacCode, date range",
+    "GET /api/appointments/:id returns full appointment with transactions",
+    "PUT /api/appointments/:id updates allowed fields and creates audit record",
+    "POST /api/appointments/:id/cancel changes status to CANCELLED, stores reason and timestamp, creates audit record",
+    "POST /api/appointments/bulk creates multiple appointments and returns per-item success/failure",
+    "GET /api/appointments/:id/audit returns chronological audit trail for the appointment",
+    "Invalid requests return 400 with descriptive error messages",
+    "Cancelling a COMPLETED or already CANCELLED appointment returns 400 error",
+    "All mutations create AuditLog records with before/after values",
+    "All unit and integration tests pass with 'npm test'"
+  ],
+  "verification": [
+    "cd /projects/sandbox/kiro-test-trapac/backend && npm test"
+  ],
+  "blocked_reason": null,
+  "findings": "All 46 tests pass (27 unit + 19 integration). Tests require --runInBand since they share a SQLite test database (prisma/test.db). Prisma schema updated to use env(DATABASE_URL) instead of hardcoded path; .env file added for dev default. @types/jest installed as missing dev dependency. Jest config uses custom tsconfig with commonjs module resolution and isolatedModules:true to work with ts-jest and Node16 module mode."
+}

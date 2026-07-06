@@ -1,0 +1,42 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Implement the frontend appointment pages and components: appointment list with search/filter, appointment creation form with dynamic fields based on transaction type, appointment detail/edit view, appointment cancellation dialog, and component tests.",
+  "status": "completed",
+  "steps": [
+    "Create frontend/src/lib/api.ts with typed API client functions: createAppointment, getAppointments (with filter params), getAppointmentById, updateAppointment, cancelAppointment, createBulkAppointments, getAppointmentAudit. Use fetch with proper error handling and base URL from environment variable NEXT_PUBLIC_API_URL defaulting to http://localhost:3001.",
+    "Create frontend/src/types/index.ts mirroring the backend types: TransactionType enum, AppointmentStatus enum, Appointment interface, AppointmentTransaction interface, CreateAppointmentRequest, UpdateAppointmentRequest, AuditLogEntry, PaginatedResponse, BulkResult.",
+    "Create frontend/src/components/appointments/AppointmentList.tsx: table/card view showing appointments with columns (appointmentNumber, transactionType, status, requestedStartTime, terminal, scacCode). Include filter controls for status, transactionType, date range, and search input for appointmentNumber/containerNumber. Pagination controls. Click row to navigate to detail.",
+    "Create frontend/src/components/appointments/AppointmentForm.tsx: form component used for both create and edit. Transaction type selector that dynamically shows/hides fields based on selection. Required fields: terminalId (dropdown), transactionType (dropdown), scacCode, truckingCompanyId, requestedStartTime, requestedEndTime. Transaction details section: referenceType, referenceNumber, containerNumber (required for PICK_IMPORT, DROP_EXPORT), bookingNumber (required for DROP_EXPORT), groupCode, edoNumber, chassisNumber (required for PICK_CHASSIS, DROP_CHASSIS), equipmentType, lineOperator. Support adding multiple transactions for bulk/dual. Form validation with error messages. Submit handler calls API.",
+    "Create frontend/src/components/appointments/AppointmentDetail.tsx: displays full appointment data with transactions, status badge, timestamps. Action buttons: Edit (if status allows), Cancel (if status allows). Shows audit trail section with timeline of changes.",
+    "Create frontend/src/components/appointments/CancelDialog.tsx: modal dialog for cancellation with required reason text input and confirm/cancel buttons.",
+    "Create frontend/src/components/appointments/BulkUpload.tsx: component for bulk appointment creation - allows user to add multiple appointment entries (mini-form per entry or paste JSON), shows validation status per item, submits all and displays per-item results.",
+    "Create frontend/src/components/ui/StatusBadge.tsx: reusable status badge component with color coding per AppointmentStatus.",
+    "Create frontend/src/components/ui/Pagination.tsx: reusable pagination component.",
+    "Create frontend/src/app/appointments/page.tsx: appointments list page that uses AppointmentList component with data fetching.",
+    "Create frontend/src/app/appointments/new/page.tsx: create appointment page using AppointmentForm in create mode.",
+    "Create frontend/src/app/appointments/[id]/page.tsx: appointment detail page using AppointmentDetail component.",
+    "Create frontend/src/app/appointments/[id]/edit/page.tsx: edit appointment page using AppointmentForm in edit mode.",
+    "Create frontend/src/app/appointments/bulk/page.tsx: bulk creation page using BulkUpload component.",
+    "Create frontend/__tests__/components/AppointmentForm.test.tsx: test that form shows correct fields for PICK_IMPORT vs DROP_EXPORT vs PICK_CHASSIS transaction types, test required field validation, test form submission calls API with correct payload.",
+    "Create frontend/__tests__/components/AppointmentList.test.tsx: test that list renders appointment data, test filter controls, test pagination.",
+    "Create frontend/__tests__/components/AppointmentDetail.test.tsx: test renders appointment details, test cancel button shows dialog, test edit button navigates.",
+    "Verify all frontend tests pass with 'npm test' and build succeeds with 'npm run build'"
+  ],
+  "acceptance_criteria": [
+    "Appointments list page at /appointments displays appointments in a table with filter and pagination controls",
+    "Create appointment page at /appointments/new shows dynamic form fields based on selected transaction type",
+    "Appointment detail page at /appointments/[id] shows full appointment data with transactions and audit trail",
+    "Cancel dialog requires a reason and calls the cancel API endpoint",
+    "Bulk creation page allows adding multiple appointments and shows per-item results",
+    "Form validation prevents submission with missing required fields and shows error messages",
+    "All frontend component tests pass with 'npm test'",
+    "Frontend builds successfully with 'npm run build'"
+  ],
+  "verification": [
+    "cd /projects/sandbox/kiro-test-trapac/frontend && npm test",
+    "cd /projects/sandbox/kiro-test-trapac/frontend && npm run build"
+  ],
+  "blocked_reason": null,
+  "findings": "All 17 tests pass. Build succeeds with all pages rendered correctly. Used setupFilesAfterEnv in jest.config.ts for @testing-library/jest-dom setup. The AppointmentList test produces act() warnings in console but tests still pass - this is a known React 18 testing behavior with async state updates in useEffect."
+}
