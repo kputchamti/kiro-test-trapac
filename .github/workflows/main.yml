@@ -26,7 +26,9 @@ jobs:
             --template-file infrastructure/cloudformation.yml \
             --stack-name my-app-stack \
             --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides Environment=prod
+            --parameter-overrides \
+              Environment=prod \
+              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
 
       - name: Deploy ECS services
         run: |
