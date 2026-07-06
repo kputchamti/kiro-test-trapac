@@ -31,9 +31,9 @@ jobs:
       - name: Deploy ECS services
         run: |
           # Build and push container images
-          aws ecr get-login-password | docker login --username AWS --password-stdin <account-id>.dkr.ecr.ap-southeast-2.amazonaws.com
+          aws ecr get-login-password | docker login --username AWS --password-stdin 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
           docker build -t my-service .
-          docker tag my-service:latest <account-id>.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
+          docker tag my-service:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
           docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
           
           # Force new deployment
