@@ -327,7 +327,7 @@ Resources:
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: ALB — allows HTTPS/HTTP from the internet
+      GroupDescription: ALB - allows HTTPS/HTTP from the internet
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -345,7 +345,7 @@ Resources:
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: ECS Fargate tasks — accepts traffic only from the ALB
+      GroupDescription: ECS Fargate tasks - accepts traffic only from the ALB
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -359,7 +359,7 @@ Resources:
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: RDS PostgreSQL — accepts traffic only from ECS tasks
+      GroupDescription: RDS PostgreSQL - accepts traffic only from ECS tasks
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -373,7 +373,7 @@ Resources:
   CacheSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: ElastiCache Redis — accepts traffic only from ECS tasks
+      GroupDescription: ElastiCache Redis - accepts traffic only from ECS tasks
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -771,7 +771,7 @@ Resources:
       DBName:                trapac_tas
       DBInstanceClass:       !Ref DBInstanceClass
       Engine:                postgres
-      EngineVersion:         "16"
+      EngineVersion:         "16.4"
       MasterUsername:        trapac_admin
       MasterUserPassword:    !Sub '{{resolve:secretsmanager:/${Environment}/trapac-tas/db-password:SecretString}}'
       AllocatedStorage:      "100"
@@ -932,12 +932,13 @@ Resources:
       MfaConfiguration: "OPTIONAL"
       EnabledMfas:
         - SOFTWARE_TOKEN_MFA
-      PasswordPolicy:
-        MinimumLength:    12
-        RequireLowercase: true
-        RequireUppercase: true
-        RequireNumbers:   true
-        RequireSymbols:   true
+      Policies:  
+        PasswordPolicy:
+          MinimumLength:    12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers:   true
+          RequireSymbols:   true
       Schema:
         - Name:     email
           Required: true
