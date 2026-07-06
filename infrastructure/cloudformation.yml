@@ -1,0 +1,1364 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  TraPac Terminal Appointment System (TAS) — AWS Infrastructure
+  Provisions VPC, ECS Fargate cluster, ALB, RDS PostgreSQL, ElastiCache Redis,
+  SQS/SNS event bus, Cognito User Pool, S3 + CloudFront (frontend),
+  ECR repositories, CloudWatch, Secrets Manager references, and WAF.
+
+# ===========================================================================
+# Parameters
+# ===========================================================================
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, qa, uat, perf, prod, dr]
+    Description: Deployment environment
+
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag for all microservice containers
+
+  ECRBaseUrl:
+    Type: String
+    Description: >
+      ECR base URL, e.g. 123456789012.dkr.ecr.us-west-2.amazonaws.com
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Master password for the RDS PostgreSQL instance
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    Description: RDS instance class
+
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.medium
+    Description: ElastiCache Redis node type
+
+  FargateTaskCPU:
+    Type: String
+    Default: "512"
+    Description: Default Fargate task CPU units (256 | 512 | 1024 | 2048 | 4096)
+
+  FargateTaskMemory:
+    Type: String
+    Default: "1024"
+    Description: Default Fargate task memory (MiB)
+
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: Desired ECS task count per service
+
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: >
+      ACM certificate ARN for HTTPS on the ALB and CloudFront.
+      Leave blank to use HTTP only (non-production).
+
+  AllowedCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR block allowed to reach the ALB (restrict in production)
+
+# ===========================================================================
+# Conditions
+# ===========================================================================
+Conditions:
+
+  IsProd:       !Equals [!Ref Environment, prod]
+  HasCert:      !Not [!Equals [!Ref CertificateArn, ""]]
+  MultiAZ:      !Or [!Equals [!Ref Environment, prod], !Equals [!Ref Environment, dr]]
+
+# ===========================================================================
+# Mappings
+# ===========================================================================
+Mappings:
+
+  ServiceNames:
+    Values:
+      ApiGateway:          api-gateway
+      IdentityService:     identity-service
+      AppointmentService:  appointment-service
+      SlotService:         slot-service
+      ValidationService:   validation-service
+      WaitlistService:     waitlist-service
+      PaymentService:      payment-service
+      NotificationService: notification-service
+      ReportingService:    reporting-service
+      TOSIntegration:      tos-integration-service
+      AuditService:        audit-service
+      WebFrontend:         web-frontend
+
+# ===========================================================================
+# Resources
+# ===========================================================================
+Resources:
+
+  # -------------------------------------------------------------------------
+  # VPC and Networking
+  # -------------------------------------------------------------------------
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-igw"
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:             !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public subnets (ALB, NAT Gateways)
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:               !Ref VPC
+      CidrBlock:           "10.0.0.0/24"
+      AvailabilityZone:    !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-a"
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:               !Ref VPC
+      CidrBlock:           "10.0.1.0/24"
+      AvailabilityZone:    !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-b"
+
+  # Private subnets (ECS tasks, RDS, ElastiCache)
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:            !Ref VPC
+      CidrBlock:        "10.0.10.0/24"
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-a"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:            !Ref VPC
+      CidrBlock:        "10.0.11.0/24"
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-b"
+
+  # NAT Gateways for private subnet egress
+  ElasticIPNatA:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  ElasticIPNatB:
+    Type: AWS::EC2::EIP
+    Condition: MultiAZ
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:  !GetAtt ElasticIPNatA.AllocationId
+      SubnetId:      !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat-a"
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Condition: MultiAZ
+    Properties:
+      AllocationId:  !GetAtt ElasticIPNatB.AllocationId
+      SubnetId:      !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat-b"
+
+  # Route tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-rt"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId:         !Ref PublicRouteTable
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId:            !Ref InternetGateway
+
+  PublicSubnetARouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:     !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:     !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-rt-a"
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:         !Ref PrivateRouteTableA
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId:         !Ref NatGatewayA
+
+  PrivateSubnetARouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:     !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-rt-b"
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:         !Ref PrivateRouteTableB
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !If
+        - MultiAZ
+        - !Ref NatGatewayB
+        - !Ref NatGatewayA
+
+  PrivateSubnetBRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:     !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  # -------------------------------------------------------------------------
+  # Security Groups
+  # -------------------------------------------------------------------------
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB — allows HTTPS/HTTP from the internet
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedCidr
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-alb-sg"
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Fargate tasks — accepts traffic only from the ALB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ecs-sg"
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS PostgreSQL — accepts traffic only from ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-db-sg"
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ElastiCache Redis — accepts traffic only from ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-cache-sg"
+
+  # -------------------------------------------------------------------------
+  # Application Load Balancer
+  # -------------------------------------------------------------------------
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name:            !Sub "${AWS::StackName}-alb"
+      Scheme:          internet-facing
+      Type:            application
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-alb"
+
+  ALBTargetGroupDefault:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:                !Sub "${AWS::StackName}-api-tg"
+      Port:                8080
+      Protocol:            HTTP
+      TargetType:          ip
+      VpcId:               !Ref VPC
+      HealthCheckPath:     /health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount:      2
+      UnhealthyThresholdCount:    3
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-api-tg"
+
+  ALBListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port:            80
+      Protocol:        HTTP
+      DefaultActions:
+        - !If
+          - HasCert
+          - Type: redirect
+            RedirectConfig:
+              Protocol:   HTTPS
+              Port:       "443"
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref ALBTargetGroupDefault
+
+  ALBListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCert
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port:            443
+      Protocol:        HTTPS
+      SslPolicy:       ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroupDefault
+
+  # -------------------------------------------------------------------------
+  # ECS Cluster
+  # -------------------------------------------------------------------------
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: !If [IsProd, FARGATE, FARGATE_SPOT]
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-cluster"
+
+  # -------------------------------------------------------------------------
+  # IAM Roles for ECS
+  # -------------------------------------------------------------------------
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-ecs-execution-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:/${Environment}/trapac-tas/*"
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-ecs-task-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-*"
+        - PolicyName: SNSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${AWS::StackName}/*"
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Log Groups
+  # -------------------------------------------------------------------------
+
+  LogGroupAPIGateway:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/api-gateway"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupIdentity:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/identity-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupAppointment:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/appointment-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupSlot:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/slot-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupValidation:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/validation-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupWaitlist:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/waitlist-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupPayment:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/payment-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupNotification:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/notification-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupReporting:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/reporting-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupTOSIntegration:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/tos-integration-service"
+      RetentionInDays: !If [IsProd, 90, 14]
+
+  LogGroupAudit:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/ecs/${AWS::StackName}/audit-service"
+      RetentionInDays: !If [IsProd, 365, 30]
+
+  # -------------------------------------------------------------------------
+  # ECR Repositories
+  # -------------------------------------------------------------------------
+
+  ECRRepoAPIGateway:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-api-gateway"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoIdentity:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-identity-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoAppointment:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-appointment-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoSlot:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-slot-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoValidation:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-validation-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoWaitlist:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-waitlist-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoPayment:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-payment-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoNotification:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-notification-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoReporting:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-reporting-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoTOSIntegration:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-tos-integration-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoAudit:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-audit-service"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  ECRRepoWebFrontend:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName:      !Sub "${AWS::StackName}-web-frontend"
+      ImageTagMutability:  MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 20 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  # -------------------------------------------------------------------------
+  # RDS PostgreSQL
+  # -------------------------------------------------------------------------
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for TraPac TAS RDS
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-db-subnet-group"
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier:  !Sub "${AWS::StackName}-postgres"
+      DBName:                trapac_tas
+      DBInstanceClass:       !Ref DBInstanceClass
+      Engine:                postgres
+      EngineVersion:         "16"
+      MasterUsername:        trapac_admin
+      MasterUserPassword:    !Ref DBPassword
+      AllocatedStorage:      "100"
+      StorageType:           gp3
+      StorageEncrypted:      true
+      MultiAZ:               !If [MultiAZ, true, false]
+      DBSubnetGroupName:     !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      BackupRetentionPeriod: !If [IsProd, 30, 7]
+      DeletionProtection:    !If [IsProd, true, false]
+      EnablePerformanceInsights: true
+      MonitoringInterval:    60
+      MonitoringRoleArn:     !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-postgres"
+
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-rds-monitoring-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+
+  # -------------------------------------------------------------------------
+  # ElastiCache Redis
+  # -------------------------------------------------------------------------
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description:   Subnet group for TraPac TAS ElastiCache
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+
+  CacheCluster:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupDescription: TraPac TAS Redis cache
+      ReplicationGroupId:          !Sub "${AWS::StackName}-redis"
+      CacheNodeType:               !Ref CacheNodeType
+      Engine:                      redis
+      EngineVersion:               "7.1"
+      NumCacheClusters:            !If [MultiAZ, 2, 1]
+      CacheSubnetGroupName:        !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AutomaticFailoverEnabled: !If [MultiAZ, true, false]
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-redis"
+
+  # -------------------------------------------------------------------------
+  # SQS Queues (event bus / integration retry)
+  # -------------------------------------------------------------------------
+
+  # Dead-letter queue
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:              !Sub "${AWS::StackName}-dlq"
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId:         alias/aws/sqs
+
+  AppointmentEventsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:                 !Sub "${AWS::StackName}-appointment-events"
+      VisibilityTimeout:         60
+      MessageRetentionPeriod:    86400
+      KmsMasterKeyId:            alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount:     5
+
+  TOSIntegrationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:                 !Sub "${AWS::StackName}-tos-integration"
+      VisibilityTimeout:         120
+      MessageRetentionPeriod:    86400
+      KmsMasterKeyId:            alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount:     5
+
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:                 !Sub "${AWS::StackName}-notifications"
+      VisibilityTimeout:         30
+      MessageRetentionPeriod:    86400
+      KmsMasterKeyId:            alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount:     3
+
+  AuditQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:                 !Sub "${AWS::StackName}-audit"
+      VisibilityTimeout:         30
+      MessageRetentionPeriod:    604800
+      KmsMasterKeyId:            alias/aws/sqs
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount:     3
+
+  # -------------------------------------------------------------------------
+  # SNS Topics
+  # -------------------------------------------------------------------------
+
+  AppointmentEventsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:  !Sub "${AWS::StackName}-appointment-events"
+      KmsMasterKeyId: alias/aws/sns
+
+  AppointmentEventsSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn:  !Ref AppointmentEventsTopic
+      Protocol:  sqs
+      Endpoint:  !GetAtt AppointmentEventsQueue.Arn
+
+  # -------------------------------------------------------------------------
+  # Cognito User Pool
+  # -------------------------------------------------------------------------
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${AWS::StackName}-user-pool"
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: "OPTIONAL"
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      PasswordPolicy:
+        MinimumLength:    12
+        RequireLowercase: true
+        RequireUppercase: true
+        RequireNumbers:   true
+        RequireSymbols:   true
+      Schema:
+        - Name:     email
+          Required: true
+          Mutable:  true
+        - Name:     custom:role
+          AttributeDataType: String
+          Mutable:  true
+        - Name:     custom:scac
+          AttributeDataType: String
+          Mutable:  true
+        - Name:     custom:terminalId
+          AttributeDataType: String
+          Mutable:  true
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name:     verified_email
+            Priority: 1
+      UserPoolTags:
+        Environment: !Ref Environment
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:                   !Sub "${AWS::StackName}-app-client"
+      UserPoolId:                   !Ref UserPool
+      GenerateSecret:               false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+      PreventUserExistenceErrors:   ENABLED
+      AccessTokenValidity:          60     # minutes
+      IdTokenValidity:              60
+      RefreshTokenValidity:         30     # days
+      TokenValidityUnits:
+        AccessToken:  minutes
+        IdToken:      minutes
+        RefreshToken: days
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain:     !Sub "${AWS::StackName}-auth"
+      UserPoolId: !Ref UserPool
+
+  # -------------------------------------------------------------------------
+  # S3 Bucket (Frontend static assets)
+  # -------------------------------------------------------------------------
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:           !Sub "${AWS::StackName}-frontend-${AWS::AccountId}"
+      AccessControl:        Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true
+        BlockPublicPolicy:     true
+        IgnorePublicAcls:      true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-frontend"
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: CloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # -------------------------------------------------------------------------
+  # CloudFront Distribution (Frontend CDN)
+  # -------------------------------------------------------------------------
+
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:                         !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior:              always
+        SigningProtocol:              sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - Id:           S3Frontend
+            DomainName:   !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+          - Id:           ALBBackend
+            DomainName:   !GetAtt ALB.DNSName
+            CustomOriginConfig:
+              HTTPSPort:              443
+              HTTPPort:               80
+              OriginProtocolPolicy:   !If [HasCert, https-only, http-only]
+        DefaultCacheBehavior:
+          TargetOriginId:        S3Frontend
+          ViewerProtocolPolicy:  redirect-to-https
+          AllowedMethods:        [GET, HEAD, OPTIONS]
+          CachedMethods:         [GET, HEAD]
+          CachePolicyId:         658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf  # CORS-S3Origin
+          Compress:              true
+        CacheBehaviors:
+          - PathPattern:          "/api/*"
+            TargetOriginId:       ALBBackend
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:       [DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT]
+            CachePolicyId:        4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewerExceptHostHeader
+        CustomErrorResponses:
+          - ErrorCode:          404
+            ResponseCode:       200
+            ResponsePagePath:   /index.html
+          - ErrorCode:          403
+            ResponseCode:       200
+            ResponsePagePath:   /index.html
+        DefaultRootObject: index.html
+        Enabled:           true
+        HttpVersion:       http2
+        PriceClass:        PriceClass_100
+        ViewerCertificate: !If
+          - HasCert
+          - AcmCertificateArn: !Ref CertificateArn
+            MinimumProtocolVersion: TLSv1.2_2021
+            SslSupportMethod: sni-only
+          - CloudFrontDefaultCertificate: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-cdn"
+
+  # -------------------------------------------------------------------------
+  # WAF (Web Application Firewall)
+  # -------------------------------------------------------------------------
+
+  WAFWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name:        !Sub "${AWS::StackName}-waf"
+      Scope:       REGIONAL
+      DefaultAction:
+        Allow: {}
+      Rules:
+        - Name:     AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName:   AWS
+              Name:         AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled:   true
+            CloudWatchMetricsEnabled: true
+            MetricName:               CommonRuleSet
+        - Name:     AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName:   AWS
+              Name:         AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled:   true
+            CloudWatchMetricsEnabled: true
+            MetricName:               KnownBadInputs
+        - Name:     AWSManagedRulesSQLiRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName:   AWS
+              Name:         AWSManagedRulesSQLiRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled:   true
+            CloudWatchMetricsEnabled: true
+            MetricName:               SQLiRuleSet
+        - Name:     RateLimitRule
+          Priority: 10
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit:           2000
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled:   true
+            CloudWatchMetricsEnabled: true
+            MetricName:               RateLimit
+      VisibilityConfig:
+        SampledRequestsEnabled:   true
+        CloudWatchMetricsEnabled: true
+        MetricName:               !Sub "${AWS::StackName}-waf"
+
+  WAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref ALB
+      WebACLArn:   !GetAtt WAFWebACL.Arn
+
+  # -------------------------------------------------------------------------
+  # Secrets Manager — DB connection string placeholder
+  # -------------------------------------------------------------------------
+
+  DBConnectionSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:        !Sub "/${Environment}/trapac-tas/db-connection"
+      Description: RDS PostgreSQL connection details for TraPac TAS
+      SecretString: !Sub |
+        {
+          "host":     "${DBInstance.Endpoint.Address}",
+          "port":     "${DBInstance.Endpoint.Port}",
+          "dbname":   "trapac_tas",
+          "username": "trapac_admin",
+          "password": "${DBPassword}"
+        }
+
+  RedisConnectionSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:        !Sub "/${Environment}/trapac-tas/redis-connection"
+      Description: ElastiCache Redis connection details for TraPac TAS
+      SecretString: !Sub |
+        {
+          "host": "${CacheCluster.PrimaryEndPoint.Address}",
+          "port": "${CacheCluster.PrimaryEndPoint.Port}"
+        }
+
+  CognitoSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:        !Sub "/${Environment}/trapac-tas/cognito"
+      Description: Cognito User Pool configuration for TraPac TAS
+      SecretString: !Sub |
+        {
+          "userPoolId":  "${UserPool}",
+          "clientId":    "${UserPoolClient}",
+          "region":      "${AWS::Region}"
+        }
+
+  # -------------------------------------------------------------------------
+  # ECS Task Definition — API Gateway service (representative example)
+  # (Remaining services follow the same pattern; the deploy script registers
+  #  them from the ecs-task-definitions/ directory.)
+  # -------------------------------------------------------------------------
+
+  TaskDefinitionAPIGateway:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family:                  !Sub "${AWS::StackName}-api-gateway"
+      NetworkMode:             awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu:                     !Ref FargateTaskCPU
+      Memory:                  !Ref FargateTaskMemory
+      ExecutionRoleArn:        !GetAtt ECSExecutionRole.Arn
+      TaskRoleArn:             !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name:      api-gateway
+          Image:     !Sub "${ECRBaseUrl}/${AWS::StackName}-api-gateway:${ImageTag}"
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol:      tcp
+          Environment:
+            - Name:  APP_ENV
+              Value: !Ref Environment
+            - Name:  PORT
+              Value: "8080"
+          Secrets:
+            - Name:      DB_CONNECTION
+              ValueFrom:  !Ref DBConnectionSecret
+            - Name:      REDIS_CONNECTION
+              ValueFrom:  !Ref RedisConnectionSecret
+            - Name:      COGNITO_CONFIG
+              ValueFrom:  !Ref CognitoSecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:         !Ref LogGroupAPIGateway
+              awslogs-region:        !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:     ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+            Interval:    30
+            Timeout:     5
+            Retries:     3
+            StartPeriod: 60
+
+  ECSServiceAPIGateway:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListenerHTTP
+    Properties:
+      ServiceName:    !Sub "${AWS::StackName}-api-gateway"
+      Cluster:        !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinitionAPIGateway
+      DesiredCount:   !Ref DesiredCount
+      LaunchType:     FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref PrivateSubnetA
+            - !Ref PrivateSubnetB
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+      LoadBalancers:
+        - ContainerName:    api-gateway
+          ContainerPort:    8080
+          TargetGroupArn:   !Ref ALBTargetGroupDefault
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 50
+        MaximumPercent:        200
+        DeploymentCircuitBreaker:
+          Enable:   true
+          Rollback: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-api-gateway"
+
+  # -------------------------------------------------------------------------
+  # CloudWatch Alarms
+  # -------------------------------------------------------------------------
+
+  AlarmHighCPU:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "${AWS::StackName}-high-cpu"
+      AlarmDescription:   ECS cluster average CPU > 80%
+      Namespace:          AWS/ECS
+      MetricName:         CPUUtilization
+      Dimensions:
+        - Name:  ClusterName
+          Value: !Ref ECSCluster
+      Statistic:          Average
+      Period:             300
+      EvaluationPeriods:  2
+      Threshold:          80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData:   notBreaching
+
+  AlarmDBConnections:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "${AWS::StackName}-db-connections"
+      AlarmDescription:   RDS connection count high
+      Namespace:          AWS/RDS
+      MetricName:         DatabaseConnections
+      Dimensions:
+        - Name:  DBInstanceIdentifier
+          Value: !Ref DBInstance
+      Statistic:          Average
+      Period:             300
+      EvaluationPeriods:  2
+      Threshold:          200
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData:   notBreaching
+
+  AlarmDLQ:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "${AWS::StackName}-dlq-messages"
+      AlarmDescription:   Messages landed in the dead-letter queue
+      Namespace:          AWS/SQS
+      MetricName:         NumberOfMessagesSent
+      Dimensions:
+        - Name:  QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic:          Sum
+      Period:             300
+      EvaluationPeriods:  1
+      Threshold:          0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData:   notBreaching
+
+# ===========================================================================
+# Outputs
+# ===========================================================================
+Outputs:
+
+  ALBDNSName:
+    Description: Public DNS name of the Application Load Balancer
+    Value: !GetAtt ALB.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-alb-dns"
+
+  CloudFrontDomain:
+    Description: CloudFront distribution domain name (frontend)
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-cf-domain"
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub "${AWS::StackName}-cf-id"
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend static assets
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-frontend-bucket"
+
+  ECSClusterName:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-cluster"
+
+  DBEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-db-endpoint"
+
+  RedisEndpoint:
+    Description: ElastiCache Redis primary endpoint
+    Value: !GetAtt CacheCluster.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub "${AWS::StackName}-redis-endpoint"
+
+  CognitoUserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub "${AWS::StackName}-user-pool-id"
+
+  CognitoClientId:
+    Description: Cognito User Pool App Client ID
+    Value: !Ref UserPoolClient
+    Export:
+      Name: !Sub "${AWS::StackName}-cognito-client-id"
+
+  AppointmentQueueUrl:
+    Description: SQS URL for appointment events
+    Value: !Ref AppointmentEventsQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-appointment-queue"
+
+  TOSIntegrationQueueUrl:
+    Description: SQS URL for TOS integration messages
+    Value: !Ref TOSIntegrationQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-tos-queue"

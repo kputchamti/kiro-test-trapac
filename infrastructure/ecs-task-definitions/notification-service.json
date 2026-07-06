@@ -1,0 +1,44 @@
+{
+  "family": "PLACEHOLDER_REPLACED_BY_DEPLOY_SCRIPT",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "notification-service",
+      "image": "PLACEHOLDER_REPLACED_BY_DEPLOY_SCRIPT",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "PORT",      "value": "8080" },
+        { "name": "LOG_LEVEL", "value": "info" }
+      ],
+      "secrets": [
+        { "name": "DB_CONNECTION",    "valueFrom": "PLACEHOLDER_DB_SECRET_ARN" },
+        { "name": "REDIS_CONNECTION", "valueFrom": "PLACEHOLDER_REDIS_SECRET_ARN" },
+        { "name": "COGNITO_CONFIG",   "valueFrom": "PLACEHOLDER_COGNITO_SECRET_ARN" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/PLACEHOLDER_STACK/notification-service",
+          "awslogs-region":        "us-west-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command":     ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+        "interval":    30,
+        "timeout":     5,
+        "retries":     3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
