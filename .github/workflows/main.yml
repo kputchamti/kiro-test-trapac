@@ -26,9 +26,11 @@ jobs:
             --template-file infrastructure/cloudformation.yml \
             --stack-name my-app-stack \
             --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
             --parameter-overrides \
               Environment=prod \
-              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
+              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com \
+              DesiredCount=0
 
       - name: Deploy ECS services
         run: |
@@ -38,5 +40,5 @@ jobs:
           docker tag my-service:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
           docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
           
-          # Force new deployment
-          aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment
+          # Scale up and force new deployment
+          aws ecs update-service --cluster my-cluster --service my-service --desired-count 2 --force-new-deployment
