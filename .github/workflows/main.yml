@@ -26,17 +26,64 @@ jobs:
             --template-file infrastructure/cloudformation.yml \
             --stack-name my-app-stack \
             --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
             --parameter-overrides \
               Environment=prod \
-              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
+              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com \
+              DesiredCount=0
 
       - name: Deploy ECS services
         run: |
           # Build and push container images
           aws ecr get-login-password | docker login --username AWS --password-stdin 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
-          docker build -t my-service .
-          docker tag my-service:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
-          docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
+          docker build -t my-app-stack-api-gateway .
+          docker tag my-app-stack-api-gateway:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-app-stack-api-gateway:latest
+          docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-app-stack-api-gateway:latest
           
-          # Force new deployment
-          aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment
+          # Scale up and force new deployment
+          aws ecs update-service --cluster my-app-stack-cluster --service my-app-stack-api-gateway --desired-count 2 --force-new-deployment
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy frontend to S3
+        run: |
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name my-app-stack \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+
+          # Sync static assets with long-lived cache headers (exclude HTML and service worker)
+          aws s3 sync frontend/out "s3://${BUCKET_NAME}" \
+            --delete \
+            --cache-control "public,max-age=31536000" \
+            --exclude "*.html" \
+            --exclude "service-worker.js"
+
+          # Sync HTML and service worker with no-cache headers
+          aws s3 sync frontend/out "s3://${BUCKET_NAME}" \
+            --delete \
+            --cache-control "no-cache" \
+            --include "*.html" \
+            --include "service-worker.js"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name my-app-stack \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+
+          aws cloudfront create-invalidation \
+            --distribution-id "${DISTRIBUTION_ID}" \
+            --paths "/*"
