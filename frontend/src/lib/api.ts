@@ -89,3 +89,14 @@ export async function getAppointmentAudit(
 ): Promise<AuditLogEntry[]> {
   return request<AuditLogEntry[]>(`/api/appointments/${id}/audit`);
 }
+
+export interface TruckingCompany {
+  truckingCompanyId: string;
+  name: string;
+  status: string;
+  scacs: Array<{ scacCode: string }>;
+}
+
+export async function getTruckingCompanies(): Promise<TruckingCompany[]> {
+  return request<TruckingCompany[]>("/api/trucking-companies");
+}

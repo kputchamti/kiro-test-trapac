@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Appointment,
   CreateAppointmentRequest,
   TransactionType,
 } from "@/types";
+import { getTruckingCompanies, TruckingCompany } from "@/lib/api";
 
 interface TransactionFormData {
   transactionType: string;
@@ -53,6 +54,7 @@ export default function AppointmentForm({
   initialData,
   onSubmit,
 }: AppointmentFormProps) {
+  const [companies, setCompanies] = useState<TruckingCompany[]>([]);
   const [terminalId, setTerminalId] = useState(
     initialData?.terminalId || ""
   );
@@ -92,6 +94,18 @@ export default function AppointmentForm({
     })) || [emptyTransaction()]
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    getTruckingCompanies().then(setCompanies).catch(() => {});
+  }, []);
+
+  function handleCompanyChange(companyId: string) {
+    setTruckingCompanyId(companyId);
+    const company = companies.find((c) => c.truckingCompanyId === companyId);
+    if (company && company.scacs.length > 0) {
+      setScacCode(company.scacs[0].scacCode);
+    }
+  }
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
@@ -260,13 +274,21 @@ export default function AppointmentForm({
           <label className="block text-sm font-medium text-gray-700">
             SCAC Code
           </label>
-          <input
-            type="text"
+          <select
             value={scacCode}
             onChange={(e) => setScacCode(e.target.value)}
             className="mt-1 block w-full border rounded px-3 py-2 text-sm"
             aria-label="SCAC Code"
-          />
+          >
+            <option value="">Select SCAC Code</option>
+            {companies.flatMap((c) =>
+              c.scacs.map((s) => (
+                <option key={s.scacCode} value={s.scacCode}>
+                  {s.scacCode} ({c.name})
+                </option>
+              ))
+            )}
+          </select>
           {errors.scacCode && (
             <p className="text-red-500 text-xs mt-1">{errors.scacCode}</p>
           )}
@@ -274,15 +296,21 @@ export default function AppointmentForm({
 
         <div>
           <label className="block text-sm font-medium text-gray-700">
-            Trucking Company ID
+            Trucking Company
           </label>
-          <input
-            type="text"
+          <select
             value={truckingCompanyId}
-            onChange={(e) => setTruckingCompanyId(e.target.value)}
+            onChange={(e) => handleCompanyChange(e.target.value)}
             className="mt-1 block w-full border rounded px-3 py-2 text-sm"
-            aria-label="Trucking Company ID"
-          />
+            aria-label="Trucking Company"
+          >
+            <option value="">Select Trucking Company</option>
+            {companies.map((c) => (
+              <option key={c.truckingCompanyId} value={c.truckingCompanyId}>
+                {c.name}
+              </option>
+            ))}
+          </select>
           {errors.truckingCompanyId && (
             <p className="text-red-500 text-xs mt-1">
               {errors.truckingCompanyId}
@@ -577,7 +605,7 @@ export default function AppointmentForm({
         <button
           type="button"
           onClick={addTransaction}
-          className="text-blue-600 text-sm font-medium hover:text-blue-800"
+          className="text-[#f15c27] text-sm font-medium hover:text-[#d94e1e]"
         >
           + Add Transaction
         </button>
@@ -586,7 +614,7 @@ export default function AppointmentForm({
       <div className="flex justify-end">
         <button
           type="submit"
-          className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 font-medium"
+          className="bg-[#f15c27] text-white px-6 py-2 rounded hover:bg-[#d94e1e] font-medium"
         >
           {mode === "create" ? "Create Appointment" : "Update Appointment"}
         </button>

@@ -10,7 +10,7 @@ const statusColors: Record<string, string> = {
   [AppointmentStatus.PENDING]:
     "bg-yellow-100 text-yellow-800",
   [AppointmentStatus.CONFIRMED]:
-    "bg-blue-100 text-blue-800",
+    "bg-[#dce6f0] text-[#141e28]",
   [AppointmentStatus.CHECKED_IN]:
     "bg-indigo-100 text-indigo-800",
   [AppointmentStatus.COMPLETED]:
