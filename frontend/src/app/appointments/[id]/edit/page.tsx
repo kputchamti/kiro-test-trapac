@@ -6,9 +6,6 @@ import { Appointment, CreateAppointmentRequest } from "@/types";
 import { getAppointmentById, updateAppointment } from "@/lib/api";
 import AppointmentForm from "@/components/appointments/AppointmentForm";
 
-export function generateStaticParams() {
-  return [];
-}
 
 export default function EditAppointmentPage() {
   const params = useParams();
