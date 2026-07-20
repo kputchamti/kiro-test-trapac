@@ -1,4 +1,4 @@
-name: Deploy to AWS Action
+name: Deploy to AWS
 
 on:
   push:
