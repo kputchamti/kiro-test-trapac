@@ -771,7 +771,7 @@ Resources:
       DBName:                trapac_tas
       DBInstanceClass:       !Ref DBInstanceClass
       Engine:                postgres
-      EngineVersion:         "16.4"
+      EngineVersion:         "16.14"
       MasterUsername:        trapac_admin
       MasterUserPassword:    !Sub '{{resolve:secretsmanager:/${Environment}/trapac-tas/db-password:SecretString}}'
       AllocatedStorage:      "100"
