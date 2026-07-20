@@ -1,7 +1,7 @@
 import EditAppointmentClient from "./EditAppointmentClient";
 
 export function generateStaticParams() {
-  return [];
+  return [{ id: "placeholder" }];
 }
 
 export default function EditAppointmentPage({
