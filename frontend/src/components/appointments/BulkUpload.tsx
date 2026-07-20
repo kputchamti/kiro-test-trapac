@@ -303,7 +303,7 @@ export default function BulkUpload() {
         <button
           type="button"
           onClick={addRow}
-          className="text-blue-600 text-sm font-medium hover:text-blue-800"
+          className="text-[#f15c27] text-sm font-medium hover:text-[#d94e1e]"
         >
           + Add Row
         </button>
@@ -311,7 +311,7 @@ export default function BulkUpload() {
           type="button"
           onClick={handleSubmit}
           disabled={submitting}
-          className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 font-medium text-sm disabled:opacity-50"
+          className="bg-[#f15c27] text-white px-6 py-2 rounded hover:bg-[#d94e1e] font-medium text-sm disabled:opacity-50"
         >
           {submitting ? "Submitting..." : "Submit All"}
         </button>
