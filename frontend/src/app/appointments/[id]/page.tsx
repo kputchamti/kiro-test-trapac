@@ -10,6 +10,10 @@ import {
 } from "@/lib/api";
 import AppointmentDetail from "@/components/appointments/AppointmentDetail";
 
+export function generateStaticParams() {
+  return [];
+}
+
 export default function AppointmentDetailPage() {
   const params = useParams();
   const router = useRouter();
