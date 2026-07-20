@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+frontend
+*.md
+design.md
+requirements.md
+tasks.md
+deploy.sh
+infrastructure
+backend/node_modules
+backend/dist
+backend/tests
+backend/.env
+backend/jest.config.ts
