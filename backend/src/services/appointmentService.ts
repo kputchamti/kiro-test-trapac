@@ -150,6 +150,22 @@ export class AppointmentService {
   }
 
   async createAppointment(data: CreateAppointmentInput, actorUserId: string) {
+    // Validate that terminal exists
+    const terminal = await this.prisma.terminal.findUnique({
+      where: { terminalId: data.terminalId },
+    });
+    if (!terminal) {
+      throw new ServiceError(`Terminal not found: ${data.terminalId}`, 400);
+    }
+
+    // Validate that trucking company exists
+    const company = await this.prisma.truckingCompany.findUnique({
+      where: { truckingCompanyId: data.truckingCompanyId },
+    });
+    if (!company) {
+      throw new ServiceError(`Trucking company not found: ${data.truckingCompanyId}`, 400);
+    }
+
     // Validate required fields based on transactionType
     this.validateRequiredFields(data.transactionType, data.transactions);
 
