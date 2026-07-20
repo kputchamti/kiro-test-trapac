@@ -37,6 +37,37 @@ jobs:
               ECRBaseUrl="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" \
               DesiredCount=0
 
+      - name: Build and deploy frontend
+        run: |
+          # Install dependencies and build static assets
+          cd frontend
+          npm ci
+          npm run build
+          cd ..
+
+          # Fetch infrastructure outputs
+          FRONTEND_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text \
+            --region "${AWS_REGION}")
+
+          CF_DISTRIBUTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text \
+            --region "${AWS_REGION}")
+
+          # Sync static assets to S3
+          aws s3 sync frontend/out/ "s3://${FRONTEND_BUCKET}" \
+            --delete \
+            --region "${AWS_REGION}"
+
+          # Invalidate CloudFront cache
+          aws cloudfront create-invalidation \
+            --distribution-id "${CF_DISTRIBUTION_ID}" \
+            --paths "/*"
+
       - name: Deploy ECS services
         run: |
           ECR_BASE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
