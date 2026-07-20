@@ -36,9 +36,9 @@ jobs:
         run: |
           # Build and push container images
           aws ecr get-login-password | docker login --username AWS --password-stdin 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
-          docker build -t my-service .
-          docker tag my-service:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
-          docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
+          docker build -t my-app-stack-api-gateway .
+          docker tag my-app-stack-api-gateway:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-app-stack-api-gateway:latest
+          docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-app-stack-api-gateway:latest
           
           # Scale up and force new deployment
-          aws ecs update-service --cluster my-cluster --service my-service --desired-count 2 --force-new-deployment
+          aws ecs update-service --cluster my-app-stack-cluster --service my-app-stack-api-gateway --desired-count 2 --force-new-deployment
