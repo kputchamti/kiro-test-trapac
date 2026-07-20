@@ -11,34 +11,49 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCOUNT_ID: "866176997550"
+      AWS_REGION: ap-southeast-2
+      STACK_NAME: my-app-stack
+      SERVICE_NAME: api-gateway
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::866176997550:role/GitHubActionsDeployRole
-          aws-region: ap-southeast-2
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
             --template-file infrastructure/cloudformation.yml \
-            --stack-name my-app-stack \
+            --stack-name "${STACK_NAME}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               Environment=prod \
-              ECRBaseUrl=866176997550.dkr.ecr.ap-southeast-2.amazonaws.com \
+              ECRBaseUrl="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" \
               DesiredCount=0
 
       - name: Deploy ECS services
         run: |
+          ECR_BASE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          ECR_REPOSITORY="${STACK_NAME}-${SERVICE_NAME}"
+          IMAGE_NAME="${ECR_BASE_URL}/${ECR_REPOSITORY}:latest"
+          ECS_CLUSTER="${STACK_NAME}-cluster"
+          ECS_SERVICE="${STACK_NAME}-${SERVICE_NAME}"
+
           # Build and push container images
-          aws ecr get-login-password | docker login --username AWS --password-stdin 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com
-          docker build -t my-service .
-          docker tag my-service:latest 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
-          docker push 866176997550.dkr.ecr.ap-southeast-2.amazonaws.com/my-service:latest
+          aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_BASE_URL}"
+          docker build -t "${ECR_REPOSITORY}" .
+          docker tag "${ECR_REPOSITORY}:latest" "${IMAGE_NAME}"
+          docker push "${IMAGE_NAME}"
           
           # Force new deployment
-          aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --force-new-deployment \
+            --region "${AWS_REGION}"
