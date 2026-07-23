@@ -1,7 +1,7 @@
 import AppointmentDetailClient from "./AppointmentDetailClient";
 
 export function generateStaticParams() {
-  return [];
+  return [{ id: "placeholder" }];
 }
 
 export default function AppointmentDetailPage({
