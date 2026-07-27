@@ -416,6 +416,8 @@ Resources:
       HealthCheckIntervalSeconds: 30
       HealthyThresholdCount:      2
       UnhealthyThresholdCount:    3
+      Matcher:
+        HttpCode: "200"
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-api-tg"

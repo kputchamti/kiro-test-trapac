@@ -72,19 +72,51 @@ jobs:
         run: |
           ECR_BASE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           ECR_REPOSITORY="${STACK_NAME}-${SERVICE_NAME}"
-          IMAGE_NAME="${ECR_BASE_URL}/${ECR_REPOSITORY}:latest"
+          # Use the full git SHA as an immutable, unique tag per build
+          IMAGE_TAG="${GITHUB_SHA}"
+          IMAGE_NAME="${ECR_BASE_URL}/${ECR_REPOSITORY}:${IMAGE_TAG}"
           ECS_CLUSTER="${STACK_NAME}-cluster"
           ECS_SERVICE="${STACK_NAME}-${SERVICE_NAME}"
+          TASK_DEF_FAMILY="${STACK_NAME}-${SERVICE_NAME}"
 
-          # Build and push container images
+          # Build and push container image tagged with the immutable git SHA
           aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_BASE_URL}"
-          docker build -t "${ECR_REPOSITORY}" .
-          docker tag "${ECR_REPOSITORY}:latest" "${IMAGE_NAME}"
+          docker build -t "${IMAGE_NAME}" .
           docker push "${IMAGE_NAME}"
-          
-          # Force new deployment
+
+          # Resolve the immutable digest from ECR so rollbacks land on the exact image
+          IMAGE_DIGEST=$(aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text \
+            --region "${AWS_REGION}")
+          IMAGE_WITH_DIGEST="${ECR_BASE_URL}/${ECR_REPOSITORY}@${IMAGE_DIGEST}"
+
+          # Fetch the current task definition and produce a new revision pinned to the digest
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition "${TASK_DEF_FAMILY}" \
+            --query 'taskDefinition' \
+            --output json \
+            --region "${AWS_REGION}")
+
+          NEW_TASK_DEF=$(echo "${TASK_DEF_JSON}" | jq \
+            --arg image "${IMAGE_WITH_DIGEST}" \
+            '.containerDefinitions[0].image = $image
+             | del(.taskDefinitionArn, .revision, .status,
+                   .requiresAttributes, .compatibilities,
+                   .registeredAt, .registeredBy)')
+
+          TASK_DEF_ARN=$(echo "${NEW_TASK_DEF}" \
+            | aws ecs register-task-definition \
+                --cli-input-json file:///dev/stdin \
+                --query 'taskDefinition.taskDefinitionArn' \
+                --output text \
+                --region "${AWS_REGION}")
+
+          # Update the ECS service to the specific, digest-pinned task definition revision
           aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
             --service "${ECS_SERVICE}" \
-            --force-new-deployment \
+            --task-definition "${TASK_DEF_ARN}" \
             --region "${AWS_REGION}"

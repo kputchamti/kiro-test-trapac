@@ -208,16 +208,16 @@ deploy_services() {
     local ecs_svc_name="${STACK_PREFIX}-${svc}"
     log "  Updating service: ${ecs_svc_name}"
 
-    # Register a new task definition revision with the latest image
-    register_task_definition "${svc}"
+    # Register a new task definition revision pinned to the image digest
+    local task_def_arn
+    task_def_arn=$(register_task_definition "${svc}")
 
     aws ecs update-service \
       --profile           "${PROFILE}" \
       --region            "${REGION}" \
       --cluster           "${cluster_name}" \
       --service           "${ecs_svc_name}" \
-      --task-definition   "${STACK_PREFIX}-${svc}" \
-      --force-new-deployment \
+      --task-definition   "${task_def_arn}" \
       --output text \
       --query "service.serviceName" \
     | xargs -I{} log "    Triggered deployment for: {}"
@@ -238,7 +238,8 @@ deploy_services() {
 }
 
 # ---------------------------------------------------------------------------
-# Register ECS task definition with the current image tag
+# Register ECS task definition pinned to an immutable image digest
+# Prints the registered task definition ARN to stdout.
 # ---------------------------------------------------------------------------
 register_task_definition() {
   local svc="$1"
@@ -249,7 +250,27 @@ register_task_definition() {
     return
   fi
 
-  local image="${ECR_BASE_URL}/${STACK_PREFIX}-${svc}:${IMAGE_TAG}"
+  local ecr_repo="${ECR_BASE_URL}/${STACK_PREFIX}-${svc}"
+
+  # Resolve the immutable digest for the pushed image tag so that a rollback
+  # to any prior task definition revision resolves to the exact prior image.
+  local digest
+  digest=$(aws ecr describe-images \
+    --profile        "${PROFILE}" \
+    --region         "${REGION}" \
+    --repository-name "${STACK_PREFIX}-${svc}" \
+    --image-ids      imageTag="${IMAGE_TAG}" \
+    --query          'imageDetails[0].imageDigest' \
+    --output         text 2>/dev/null || echo "")
+
+  local image
+  if [[ -n "${digest}" && "${digest}" != "None" ]]; then
+    # Pin to the digest so rollbacks land on the exact image, not the current :latest
+    image="${ecr_repo}@${digest}"
+  else
+    warn "Could not resolve digest for ${svc}:${IMAGE_TAG}; falling back to tag reference."
+    image="${ecr_repo}:${IMAGE_TAG}"
+  fi
 
   # Replace placeholders in the template and register
   local rendered
@@ -265,14 +286,17 @@ register_task_definition() {
      | .taskRoleArn      = "arn:aws:iam::'"${ACCOUNT_ID}"':role/'"${STACK_PREFIX}"'-'"${svc}"'-task-role"' \
     "${task_def_file}")
 
-  echo "${rendered}" \
+  local task_def_arn
+  task_def_arn=$(echo "${rendered}" \
     | aws ecs register-task-definition \
         --profile "${PROFILE}" \
         --region  "${REGION}" \
         --cli-input-json file:///dev/stdin \
         --query  "taskDefinition.taskDefinitionArn" \
-        --output text \
-    | xargs -I{} log "    Registered task definition: {}"
+        --output text)
+
+  log "    Registered task definition: ${task_def_arn} (image: ${image})"
+  echo "${task_def_arn}"
 }
 
 # ---------------------------------------------------------------------------
