@@ -11,6 +11,12 @@ const prisma = new PrismaClient();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Health check (must be before auth middleware so ALB/ECS health probes succeed)
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 app.use(authMiddleware);
 
 // Health check
