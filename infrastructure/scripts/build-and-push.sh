@@ -62,6 +62,14 @@ build_and_push() {
   docker push "${full_image}"
   docker push "${ecr_repo}:${sha_tag}"
 
+  # Resolve and log the immutable digest so callers can pin task definitions
+  local digest
+  digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${full_image}" 2>/dev/null \
+    | grep -o 'sha256:[a-f0-9]*' || echo "")
+  if [[ -n "${digest}" ]]; then
+    echo "[INFO] ${svc} digest: ${ecr_repo}@${digest}"
+  fi
+
   echo "[OK]  ${svc} pushed successfully."
 }
 

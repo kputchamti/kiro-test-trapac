@@ -12,6 +12,20 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+// HTTP access logging — records every request (including /health probes) to stdout
+// so CloudWatch Logs captures probe activity and silent failures are observable.
+app.use((req, _res, next) => {
+  console.log(
+    JSON.stringify({
+      time: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      ip: req.ip,
+    })
+  );
+  next();
+});
+
 // Health check (must be before auth middleware so ALB/ECS health probes succeed)
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
